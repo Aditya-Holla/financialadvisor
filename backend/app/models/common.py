@@ -1,6 +1,7 @@
 """Common response models used across the API."""
 
 from typing import Optional
+from datetime import datetime
 from pydantic import BaseModel
 
 
@@ -14,8 +15,23 @@ class HealthResponse(StatusResponse):
     pass
 
 
+class APIError(BaseModel):
+    """Standardized API error response."""
+    code: str
+    message: str
+    details: Optional[str] = None
+
+
 class ErrorResponse(BaseModel):
-    """Standard error response."""
+    """Standard error response (legacy, use APIError for new code)."""
     error: str
     detail: Optional[str] = None
+
+
+class MeResponse(BaseModel):
+    """User identity response for /me endpoint."""
+    user_id: str
+    email: Optional[str] = None
+    broker_linked: bool
+    last_sync: Optional[datetime] = None
 
