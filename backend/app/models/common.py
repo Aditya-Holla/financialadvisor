@@ -35,3 +35,11 @@ class MeResponse(BaseModel):
     broker_linked: bool
     last_sync: Optional[datetime] = None
 
+
+class RecommendationResponse(BaseModel):
+    """Response for recommendation generation."""
+    recommendation_id: str
+    decision: str
+    status: str
+    created_at: str
+

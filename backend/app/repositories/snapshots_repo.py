@@ -33,9 +33,32 @@ def get_latest_snapshot(user_id: str, supabase: Optional[Client] = None) -> Opti
         
     Returns:
         Latest snapshot dictionary or None if not found
+        
+    Raises:
+        ExternalServiceError: If database query fails
     """
-    # TODO: Implement latest snapshot retrieval
-    raise NotImplementedError("Latest snapshot retrieval not yet implemented")
+    if supabase is None:
+        supabase = get_supabase()
+    
+    try:
+        response = (
+            supabase.table("snapshots")
+            .select("*")
+            .eq("user_id", user_id)
+            .order("as_of", desc=True)
+            .limit(1)
+            .execute()
+        )
+        
+        if not response.data or len(response.data) == 0:
+            return None
+        
+        return response.data[0]
+    except Exception as e:
+        raise ExternalServiceError(
+            f"Failed to get latest snapshot: {str(e)}",
+            "SNAPSHOT_QUERY_ERROR"
+        )
 
 
 def get_snapshot_history(user_id: str, days: int = 30, supabase: Optional[Client] = None) -> List[Dict[str, Any]]:
