@@ -12,14 +12,38 @@ def create_recommendation(user_id: str, rec_data: Dict[str, Any], supabase: Opti
     
     Args:
         user_id: User ID
-        rec_data: Recommendation data (rec_json, status, etc.)
+        rec_data: Recommendation data (decision, proposal_json, status, etc.)
         supabase: Optional Supabase client
         
     Returns:
         Created recommendation dictionary
+        
+    Raises:
+        ExternalServiceError: If database operation fails
     """
-    # TODO: Implement recommendation creation
-    raise NotImplementedError("Recommendation creation not yet implemented")
+    if supabase is None:
+        supabase = get_supabase()
+    
+    # Ensure user_id is in the recommendation data
+    rec_data["user_id"] = user_id
+    
+    try:
+        response = supabase.table("recommendations").insert(rec_data).execute()
+        
+        if not response.data or len(response.data) == 0:
+            raise ExternalServiceError(
+                "Recommendation creation returned no data",
+                "RECOMMENDATION_CREATE_ERROR"
+            )
+        
+        return response.data[0]
+    except ExternalServiceError:
+        raise
+    except Exception as e:
+        raise ExternalServiceError(
+            f"Failed to create recommendation: {str(e)}",
+            "RECOMMENDATION_CREATE_ERROR"
+        )
 
 
 def get_recommendation(recommendation_id: str, supabase: Optional[Client] = None) -> Optional[Dict[str, Any]]:
