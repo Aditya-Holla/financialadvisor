@@ -12,7 +12,7 @@ Rules of Engagement:
 from typing import Optional, Dict, Any, List
 from enum import Enum
 from pydantic import BaseModel, Field, model_validator
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class AgentContext(BaseModel):
@@ -27,7 +27,7 @@ class AgentRequest(BaseModel):
     """Base request model for agents."""
     
     context: AgentContext = Field(..., description="Agent context")
-    timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat(), description="Request timestamp")
+    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat(), description="Request timestamp")
 
 
 class AgentResponse(BaseModel):
@@ -36,7 +36,7 @@ class AgentResponse(BaseModel):
     success: bool = Field(..., description="Whether the operation succeeded")
     message: Optional[str] = Field(None, description="Response message")
     data: Optional[Dict[str, Any]] = Field(None, description="Response data")
-    timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat(), description="Response timestamp")
+    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat(), description="Response timestamp")
 
 
 class TutorMessage(BaseModel):
@@ -44,7 +44,7 @@ class TutorMessage(BaseModel):
     
     role: str = Field(..., description="Message role: user, assistant, or system")
     content: str = Field(..., description="Message content")
-    timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat(), description="Message timestamp")
+    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat(), description="Message timestamp")
 
 
 # Canonical Financial Schemas
@@ -141,7 +141,8 @@ class FinancialState(BaseModel):
     debt_summary: DebtSummary = Field(default_factory=DebtSummary.default, description="Debt obligations")
     portfolio_summary: PortfolioSummary = Field(default_factory=PortfolioSummary.default, description="Investment portfolio")
     goals: List[FinancialGoal] = Field(default_factory=list, description="Financial goals")
-    timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat(), description="State timestamp")
+    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat(), description="State timestamp")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata (e.g., credit_card_apr)")
     
     @classmethod
     def default(cls) -> "FinancialState":
@@ -152,7 +153,8 @@ class FinancialState(BaseModel):
             debt_summary=DebtSummary.default(),
             portfolio_summary=PortfolioSummary.default(),
             goals=[FinancialGoal.default()],
-            timestamp=datetime.utcnow().isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            metadata={}
         )
 
 
@@ -351,6 +353,8 @@ class RequiredConfirmation(BaseModel):
     type: str = Field(..., description="Confirmation type (e.g., 'risk_acknowledgment', 'amount_verification')")
     message: str = Field(..., description="Message to display to user")
     required: bool = Field(True, description="Whether confirmation is required")
+    confirmation_text: Optional[str] = Field(None, description="Checkbox text for WARN confirmations")
+    override_acknowledgement: Optional[str] = Field(None, description="Explicit override text for BLOCK confirmations")
     
     @classmethod
     def default(cls) -> "RequiredConfirmation":
@@ -359,7 +363,9 @@ class RequiredConfirmation(BaseModel):
             confirmation_id="conf-1",
             type="risk_acknowledgment",
             message="This proposal increases your risk exposure. Do you want to proceed?",
-            required=True
+            required=True,
+            confirmation_text="I understand the risks and want to proceed",
+            override_acknowledgement=None
         )
 
 
@@ -400,5 +406,38 @@ class AdvisorDecision(BaseModel):
             explanation_inputs=[ExplanationInput.default()],
             reasoning="Proposal aligns with user profile and financial goals",
             metadata={}
+        )
+
+
+class TeachingPoint(BaseModel):
+    """A teaching point in the explanation."""
+    
+    topic: str = Field(..., description="Topic of the teaching point")
+    explanation: str = Field(..., description="Educational explanation")
+    relevance: str = Field(..., description="Why this is relevant to the decision")
+
+
+class TutorExplanation(BaseModel):
+    """Tutor agent explanation of an advisor decision."""
+    
+    explanation_text: str = Field(..., description="Main explanation text")
+    teaching_points: List[TeachingPoint] = Field(default_factory=list, description="Educational teaching points")
+    guardrail_references: List[str] = Field(default_factory=list, description="Guardrail reason codes referenced")
+    proposal_referenced: bool = Field(False, description="Whether portfolio proposal is referenced")
+    
+    @classmethod
+    def default(cls) -> "TutorExplanation":
+        """Unit-testable default."""
+        return cls(
+            explanation_text="This recommendation has been reviewed and approved.",
+            teaching_points=[
+                TeachingPoint(
+                    topic="Portfolio Diversification",
+                    explanation="Diversification helps reduce risk by spreading investments across different assets.",
+                    relevance="This proposal maintains a balanced allocation."
+                )
+            ],
+            guardrail_references=[],
+            proposal_referenced=True
         )
 

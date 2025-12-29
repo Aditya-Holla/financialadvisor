@@ -79,7 +79,7 @@ class OrchestratorAgent:
             proposal=proposal
         )
         
-        # Step 2: If BLOCK -> return REJECT decision with explanation_inputs only
+        # Step 2: If BLOCK -> return REJECT decision with override confirmations
         if guardrail_result.status == GuardrailStatus.BLOCK:
             explanation_inputs = self._build_explanation_inputs_from_guardrails(
                 guardrail_result,
@@ -87,12 +87,15 @@ class OrchestratorAgent:
                 user_intent
             )
             
+            # Build override confirmations for BLOCK
+            override_confirmations = self._build_confirmations_from_guardrails(guardrail_result)
+            
             return AdvisorDecision(
                 decision=AdvisorDecisionType.REJECT,
                 proposal=None,  # No proposal when blocked
-                required_confirmations=[],
+                required_confirmations=override_confirmations,  # Override confirmations for BLOCK
                 explanation_inputs=explanation_inputs,
-                reasoning="Request blocked by guardrails. See explanation inputs for details.",
+                reasoning="Request blocked by guardrails. Override confirmations required to proceed.",
                 metadata={
                     "guardrail_status": guardrail_result.status.value,
                     "guardrail_reasons": [r.code for r in guardrail_result.reasons]
@@ -297,19 +300,43 @@ class OrchestratorAgent:
         self,
         guardrail_result: GuardrailResult
     ) -> List[RequiredConfirmation]:
-        """Build required confirmations based on guardrail warnings."""
+        """
+        Build required confirmations based on guardrail warnings and blocks.
+        
+        Rules:
+        - WARN → require user confirmation checkbox text
+        - BLOCK → require explicit override acknowledgement text
+        """
         confirmations = []
         
-        for reason in guardrail_result.reasons:
-            if reason.severity == "warning":
-                # Create confirmation for each warning
-                confirmation_type = self._get_confirmation_type_from_reason(reason.code)
-                confirmations.append(RequiredConfirmation(
-                    confirmation_id=f"conf_{reason.code.lower()}",
-                    type=confirmation_type,
-                    message=reason.message,
-                    required=True
-                ))
+        if guardrail_result.status == GuardrailStatus.BLOCK:
+            # BLOCK requires explicit override acknowledgement
+            for reason in guardrail_result.reasons:
+                if reason.severity == "error":
+                    confirmation_type = self._get_confirmation_type_from_reason(reason.code)
+                    override_text = self._get_override_acknowledgement_text(reason.code, reason.message)
+                    confirmations.append(RequiredConfirmation(
+                        confirmation_id=f"conf_{reason.code.lower()}",
+                        type=confirmation_type,
+                        message=reason.message,
+                        required=True,
+                        confirmation_text=None,  # BLOCK doesn't use checkbox
+                        override_acknowledgement=override_text
+                    ))
+        elif guardrail_result.status == GuardrailStatus.WARN:
+            # WARN requires checkbox confirmation
+            for reason in guardrail_result.reasons:
+                if reason.severity == "warning":
+                    confirmation_type = self._get_confirmation_type_from_reason(reason.code)
+                    checkbox_text = self._get_confirmation_checkbox_text(reason.code, reason.message)
+                    confirmations.append(RequiredConfirmation(
+                        confirmation_id=f"conf_{reason.code.lower()}",
+                        type=confirmation_type,
+                        message=reason.message,
+                        required=True,
+                        confirmation_text=checkbox_text,
+                        override_acknowledgement=None  # WARN doesn't use override
+                    ))
         
         return confirmations
     
@@ -318,10 +345,33 @@ class OrchestratorAgent:
         mapping = {
             "LOW_EMERGENCY_FUND_RISK_INCREASE": "risk_acknowledgment",
             "LOW_EMERGENCY_FUND_INVESTMENT": "emergency_fund_acknowledgment",
+            "LOW_EMERGENCY_FUND_LARGE_INVESTMENT": "emergency_fund_acknowledgment",
             "HIGH_INTEREST_DEBT_LUMP_SUM": "debt_acknowledgment",
             "SHORT_TERM_GOAL_EQUITY_HEAVY": "goal_timeframe_acknowledgment",
+            "NEGATIVE_CASHFLOW_INVEST": "cashflow_acknowledgment",
         }
         return mapping.get(reason_code, "general_acknowledgment")
+    
+    def _get_confirmation_checkbox_text(self, reason_code: str, reason_message: str) -> str:
+        """Get checkbox text for WARN confirmations."""
+        # Generate checkbox text based on reason
+        checkbox_texts = {
+            "LOW_EMERGENCY_FUND_RISK_INCREASE": "I understand my emergency fund is below recommended levels and want to proceed",
+            "LOW_EMERGENCY_FUND_INVESTMENT": "I understand my emergency fund is below recommended levels and want to proceed",
+            "HIGH_INTEREST_DEBT_LUMP_SUM": "I understand I have high-interest debt and want to proceed with this investment",
+            "SHORT_TERM_GOAL_EQUITY_HEAVY": "I understand the risks of equity-heavy allocation for short-term goals and want to proceed",
+        }
+        return checkbox_texts.get(reason_code, f"I understand: {reason_message}")
+    
+    def _get_override_acknowledgement_text(self, reason_code: str, reason_message: str) -> str:
+        """Get explicit override acknowledgement text for BLOCK confirmations."""
+        # Generate override text that user must explicitly acknowledge
+        override_texts = {
+            "NEGATIVE_CASHFLOW_INVEST": "I acknowledge that I have negative cash flow and explicitly override the safety guardrail to proceed with this investment",
+            "LOW_EMERGENCY_FUND_LARGE_INVESTMENT": "I acknowledge that my emergency fund is insufficient and explicitly override the safety guardrail to proceed with this large investment",
+            "SHORT_TERM_GOAL_EQUITY_HEAVY": "I acknowledge the risk to my short-term goals and explicitly override the safety guardrail to proceed with this equity-heavy allocation",
+        }
+        return override_texts.get(reason_code, f"I explicitly acknowledge and override: {reason_message}")
     
     async def orchestrate(self, request: AgentRequest) -> AgentResponse:
         """

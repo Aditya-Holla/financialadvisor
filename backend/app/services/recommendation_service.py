@@ -72,7 +72,12 @@ class RecommendationService:
             raise NotFoundError("Portfolio snapshot not found", "SNAPSHOT_NOT_FOUND")
         
         # Step 2: Build FinancialState
+        # Capture timestamp at decision time for deterministic replay
+        from datetime import datetime, timezone
+        decision_timestamp = datetime.now(timezone.utc).isoformat()
         financial_state = self._build_financial_state(profile, snapshot)
+        # Override timestamp to ensure deterministic replay
+        financial_state.timestamp = decision_timestamp
         
         # Step 3: Build UserIntent
         user_intent = self._build_user_intent(user_intent_data or {})
@@ -254,7 +259,7 @@ class RecommendationService:
             Recommendation data dictionary
         """
         import json
-        from datetime import datetime
+        from datetime import datetime, timezone
         
         rec_data = {
             "decision": decision.decision.value,
@@ -266,7 +271,9 @@ class RecommendationService:
             "guardrail_reasons": json.dumps(decision.metadata.get("guardrail_reasons", [])),
             "computed_values_json": json.dumps(decision.metadata.get("computed_values", {})),
             "status": "pending",  # pending, approved, rejected
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            # Store evaluation timestamp for deterministic replay
+            "evaluation_timestamp": financial_state.timestamp,
         }
         
         return rec_data

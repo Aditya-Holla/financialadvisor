@@ -84,12 +84,25 @@ class TestRecommendationService:
         
         # Mock orchestrator
         mock_orchestrator = AsyncMock()
-        mock_orchestrator.decide.return_value = Mock(
+        mock_decision = Mock(
             decision=AdvisorDecisionType.APPROVE,
             proposal=None,
             metadata={"guardrail_status": "ALLOW"}
         )
+        # Configure model_dump() to return a serializable dictionary
+        mock_decision.model_dump.return_value = {
+            "decision": "approve",
+            "proposal": None,
+            "required_confirmations": [],
+            "explanation_inputs": [],
+            "reasoning": None,
+            "metadata": {"guardrail_status": "ALLOW"}
+        }
+        mock_orchestrator.decide.return_value = mock_decision
         mock_orchestrator_class.return_value = mock_orchestrator
+        
+        # Replace the service's orchestrator with the mock
+        service.orchestrator = mock_orchestrator
         
         mock_create_rec.return_value = mock_recommendation
         
@@ -151,12 +164,25 @@ class TestRecommendationService:
         mock_get_snapshot.return_value = mock_snapshot
         
         mock_orchestrator = AsyncMock()
-        mock_orchestrator.decide.return_value = Mock(
+        mock_decision = Mock(
             decision=AdvisorDecisionType.APPROVE,
             proposal=None,
             metadata={"guardrail_status": "ALLOW"}
         )
+        # Configure model_dump() to return a serializable dictionary
+        mock_decision.model_dump.return_value = {
+            "decision": "approve",
+            "proposal": None,
+            "required_confirmations": [],
+            "explanation_inputs": [],
+            "reasoning": None,
+            "metadata": {"guardrail_status": "ALLOW"}
+        }
+        mock_orchestrator.decide.return_value = mock_decision
         mock_orchestrator_class.return_value = mock_orchestrator
+        
+        # Replace the service's orchestrator with the mock
+        service.orchestrator = mock_orchestrator
         
         mock_create_rec.return_value = mock_recommendation
         

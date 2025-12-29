@@ -172,8 +172,22 @@ class GuardrailAgent:
                             # ISO date format (YYYY-MM-DD)
                             target_date = datetime.fromisoformat(date_str)
                         
-                        now = datetime.now()
-                        months_away = (target_date - now).days / 30.0
+                        # Use financial_state timestamp for deterministic calculations
+                        # If timestamp not available, use current time (but this should be stored)
+                        if financial_state.timestamp:
+                            try:
+                                eval_time = datetime.fromisoformat(financial_state.timestamp)
+                                if eval_time.tzinfo:
+                                    from datetime import timezone
+                                    eval_time = eval_time.replace(tzinfo=None)
+                            except (ValueError, TypeError):
+                                # Fallback to current time if timestamp invalid
+                                eval_time = datetime.now()
+                        else:
+                            # Fallback to current time if no timestamp
+                            eval_time = datetime.now()
+                        
+                        months_away = (target_date - eval_time).days / 30.0
                         computed_values[f"goal_{goal.goal_id}_months_away"] = months_away
                         
                         if months_away < self.SHORT_TERM_GOAL_MONTHS and months_away > 0:

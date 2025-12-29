@@ -207,6 +207,37 @@ class TestOrchestratorDecide:
         assert len(decision.required_confirmations) > 0
         assert all(conf.required for conf in decision.required_confirmations)
         assert all(conf.message for conf in decision.required_confirmations)
+        # WARN should have confirmation_text (checkbox), not override_acknowledgement
+        assert all(conf.confirmation_text is not None for conf in decision.required_confirmations)
+        assert all(conf.override_acknowledgement is None for conf in decision.required_confirmations)
+    
+    async def test_block_includes_override_confirmations(self, orchestrator):
+        """Test that BLOCK decision includes override confirmations."""
+        financial_state = FinancialState(
+            cashflow=Cashflow(
+                monthly_income=2000.0,
+                monthly_expenses=3000.0,
+                net_cashflow=-1000.0
+            ),
+            emergency_fund_months=6.0,
+            debt_summary=DebtSummary.default(),
+            portfolio_summary=PortfolioSummary.default(),
+            goals=[]
+        )
+        
+        user_intent = UserIntent(
+            type=UserIntentType.INVEST,
+            amount=1000.0,
+            timeframe="immediate"
+        )
+        
+        decision = await orchestrator.decide(financial_state, user_intent, proposal=None)
+        
+        # BLOCK should have override_acknowledgement, not confirmation_text
+        assert len(decision.required_confirmations) > 0
+        assert all(conf.required for conf in decision.required_confirmations)
+        assert all(conf.override_acknowledgement is not None for conf in decision.required_confirmations)
+        assert all(conf.confirmation_text is None for conf in decision.required_confirmations)
     
     async def test_allow_includes_explanation_inputs(self, orchestrator, healthy_financial_state, sample_proposal):
         """Test that ALLOW decision includes proper explanation inputs."""

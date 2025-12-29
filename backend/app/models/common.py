@@ -43,3 +43,20 @@ class RecommendationResponse(BaseModel):
     status: str
     created_at: str
 
+
+class LatestRecommendationResponse(BaseModel):
+    """Response for latest recommendation retrieval."""
+    recommendation_id: str
+    decision: str
+    status: str
+    created_at: str
+    guardrail_status: Optional[str] = None
+    has_proposal: bool = False
+
+
+class ApprovalResponse(BaseModel):
+    """Response for recommendation approval."""
+    recommendation_id: str
+    status: str
+    message: str
+

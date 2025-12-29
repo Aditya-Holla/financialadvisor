@@ -1,4 +1,24 @@
-"""User identity endpoint."""
+"""User identity endpoint.
+
+Frontend Response Contract:
+GET /me
+
+Response: MeResponse
+{
+  "user_id": "user-123",
+  "email": "user@example.com",
+  "broker_linked": false,
+  "last_sync": "2024-01-15T10:30:00"  // ISO datetime or null
+}
+
+Example Response:
+{
+  "user_id": "user-123",
+  "email": "user@example.com",
+  "broker_linked": true,
+  "last_sync": "2024-01-15T10:30:00"
+}
+"""
 
 from fastapi import APIRouter, Depends
 from app.models.common import MeResponse
@@ -14,6 +34,20 @@ async def get_me(user: UserContext = Depends(get_current_user)):
     Returns who you are + account state.
     
     Requires: Authorization: Bearer <token>
+    
+    Response Contract:
+    - user_id: string (required) - User's unique identifier
+    - email: string | null - User's email address
+    - broker_linked: boolean (required) - Whether broker account is linked
+    - last_sync: ISO datetime string | null - Last portfolio sync timestamp
+    
+    Example Response:
+    {
+      "user_id": "user-123",
+      "email": "user@example.com",
+      "broker_linked": true,
+      "last_sync": "2024-01-15T10:30:00"
+    }
     """
     # TODO: Check broker_linked status from database
     # TODO: Get last_sync from database
