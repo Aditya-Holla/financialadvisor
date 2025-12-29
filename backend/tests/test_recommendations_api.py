@@ -78,7 +78,7 @@ class TestRecommendationsAPI:
         """Test that endpoint requires authentication."""
         response = client.post("/recommendations/generate", json={})
         
-        assert response.status_code == 403  # Forbidden
+        assert response.status_code == 401  # Unauthorized
     
     @patch('app.routers.recommendations.get_current_user')
     @patch('app.routers.recommendations.RecommendationService')

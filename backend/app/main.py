@@ -9,7 +9,7 @@ from app.models.errors import (
     ExternalServiceError,
     create_api_error_response,
 )
-from app.routers import health, me, profile, portfolio, recommendations
+from app.routers import health, me, profile, portfolio, recommendations, chat
 
 app = FastAPI(title="Financial Advisor Backend")
 
@@ -110,3 +110,4 @@ app.include_router(me.router)
 app.include_router(profile.router)
 app.include_router(portfolio.router)
 app.include_router(recommendations.router)
+app.include_router(chat.router)

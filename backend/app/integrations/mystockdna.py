@@ -3,7 +3,7 @@
 from typing import List, Optional
 from app.models.mystockdna import StockDNAAnalysis, StockDNABatchResponse
 from app.models.errors import ExternalServiceError
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 def analyze_stock(symbol: str) -> StockDNAAnalysis:
@@ -62,7 +62,7 @@ def analyze_stocks(symbols: List[str]) -> StockDNABatchResponse:
         
         return StockDNABatchResponse(
             analyses=analyses,
-            timestamp=datetime.utcnow().isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat()
         )
     except ExternalServiceError:
         raise

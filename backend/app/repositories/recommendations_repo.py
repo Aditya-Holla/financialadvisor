@@ -56,9 +56,30 @@ def get_recommendation(recommendation_id: str, supabase: Optional[Client] = None
         
     Returns:
         Recommendation dictionary or None if not found
+        
+    Raises:
+        ExternalServiceError: If database query fails
     """
-    # TODO: Implement recommendation retrieval
-    raise NotImplementedError("Recommendation retrieval not yet implemented")
+    if supabase is None:
+        supabase = get_supabase()
+    
+    try:
+        response = (
+            supabase.table("recommendations")
+            .select("*")
+            .eq("id", recommendation_id)
+            .execute()
+        )
+        
+        if not response.data or len(response.data) == 0:
+            return None
+        
+        return response.data[0]
+    except Exception as e:
+        raise ExternalServiceError(
+            f"Failed to get recommendation: {str(e)}",
+            "RECOMMENDATION_QUERY_ERROR"
+        )
 
 
 def get_latest_recommendation(user_id: str, supabase: Optional[Client] = None) -> Optional[Dict[str, Any]]:
@@ -71,9 +92,32 @@ def get_latest_recommendation(user_id: str, supabase: Optional[Client] = None) -
         
     Returns:
         Latest recommendation dictionary or None if not found
+        
+    Raises:
+        ExternalServiceError: If database query fails
     """
-    # TODO: Implement latest recommendation retrieval
-    raise NotImplementedError("Latest recommendation retrieval not yet implemented")
+    if supabase is None:
+        supabase = get_supabase()
+    
+    try:
+        response = (
+            supabase.table("recommendations")
+            .select("*")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        
+        if not response.data or len(response.data) == 0:
+            return None
+        
+        return response.data[0]
+    except Exception as e:
+        raise ExternalServiceError(
+            f"Failed to get latest recommendation: {str(e)}",
+            "RECOMMENDATION_QUERY_ERROR"
+        )
 
 
 def get_recommendation_history(user_id: str, limit: int = 20, supabase: Optional[Client] = None) -> List[Dict[str, Any]]:
