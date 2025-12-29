@@ -22,10 +22,20 @@ from app.services.approval_service import ApprovalService
 router = APIRouter(prefix="/recommendations", tags=["recommendations"])
 
 
+class IntentDataRequest(BaseModel):
+    """Optional user intent data for recommendation generation."""
+    type: Optional[str] = None
+    amount: Optional[float] = None
+    risk_change: Optional[float] = None
+    target: Optional[str] = None
+    timeframe: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
 @router.post("/generate", response_model=RecommendationResponse)
 async def generate_recommendation(
     user: UserContext = Depends(get_current_user),
-    intent_data: Optional[Dict[str, Any]] = Body(None, description="Optional user intent data")
+    intent_data: Optional[IntentDataRequest] = Body(default=None, embed=False)
 ):
     """
     Generates one recommendation for the user.
@@ -34,7 +44,7 @@ async def generate_recommendation(
     
     Requires: Authorization: Bearer <token>
     
-    Request Body (optional):
+    Request Body (optional - can be empty {} or omitted):
     {
       "type": "invest",  // "invest", "withdraw", "rebalance", "change_risk", etc.
       "amount": 1000.0,  // Optional: dollar amount
@@ -42,6 +52,8 @@ async def generate_recommendation(
       "target": "AAPL",  // Optional: target symbol or goal
       "timeframe": "immediate"  // Optional: timeframe string
     }
+    
+    Note: You can send an empty object {} or omit the body entirely.
     
     Response Contract:
     - recommendation_id: string (required) - Unique recommendation identifier
@@ -67,9 +79,12 @@ async def generate_recommendation(
     """
     service = RecommendationService()
     
+    # Convert Pydantic model to dict, or None if not provided
+    user_intent_data = intent_data.model_dump(exclude_none=True) if intent_data else None
+    
     recommendation = await service.generate_recommendation(
         user_id=user.user_id,
-        user_intent_data=intent_data
+        user_intent_data=user_intent_data
     )
     
     return RecommendationResponse(

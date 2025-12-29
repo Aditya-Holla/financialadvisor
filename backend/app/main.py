@@ -1,6 +1,8 @@
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request, status, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+import logging
 from app.models.errors import (
     AppError,
     AuthError,
@@ -10,6 +12,12 @@ from app.models.errors import (
     create_api_error_response,
 )
 from app.routers import health, me, profile, portfolio, recommendations, chat
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
 app = FastAPI(title="Financial Advisor Backend")
 
@@ -23,6 +31,33 @@ app.add_middleware(
 )
 
 # Global exception handlers for consistent error responses
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Handle HTTP exceptions (including authentication errors from HTTPBearer)."""
+    # Convert authentication-related HTTPExceptions to our format
+    if exc.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN):
+        # Check if this is an authentication error
+        if "not authenticated" in exc.detail.lower() or "not authorized" in exc.detail.lower():
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content=create_api_error_response(
+                    code="AUTH_REQUIRED",
+                    message="Authentication required. Please provide a valid Bearer token.",
+                    details=None
+                )
+            )
+    
+    # For other HTTPExceptions, return them as-is but in our format
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=create_api_error_response(
+            code=f"HTTP_{exc.status_code}",
+            message=exc.detail,
+            details=None
+        )
+    )
+
+
 @app.exception_handler(AuthError)
 async def auth_error_handler(request: Request, exc: AuthError):
     """Handle authentication/authorization errors."""
@@ -49,9 +84,33 @@ async def not_found_error_handler(request: Request, exc: NotFoundError):
     )
 
 
+@app.exception_handler(RequestValidationError)
+async def request_validation_error_handler(request: Request, exc: RequestValidationError):
+    """Handle FastAPI request validation errors (422)."""
+    # Extract the first error message for clarity
+    errors = exc.errors()
+    if errors:
+        first_error = errors[0]
+        field_path = " -> ".join(str(loc) for loc in first_error.get("loc", []))
+        error_msg = first_error.get("msg", "Validation error")
+        error_type = first_error.get("type", "validation_error")
+        message = f"Validation error in {field_path}: {error_msg}"
+    else:
+        message = "Request validation failed"
+    
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content=create_api_error_response(
+            code="VALIDATION_ERROR",
+            message=message,
+            details=errors
+        )
+    )
+
+
 @app.exception_handler(ValidationError)
 async def validation_error_handler(request: Request, exc: ValidationError):
-    """Handle validation errors."""
+    """Handle application validation errors."""
     return JSONResponse(
         status_code=status.HTTP_400_BAD_REQUEST,
         content=create_api_error_response(

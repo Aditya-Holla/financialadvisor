@@ -18,6 +18,7 @@ from app.agents.schemas import (
     GuardrailReason,
     GuardrailStatus,
 )
+from app.integrations.llm import LLMIntegration
 
 
 class TutorAgent:
@@ -36,9 +37,14 @@ class TutorAgent:
     - ONLY explains what already exists
     """
     
-    def __init__(self):
-        """Initialize the tutor agent."""
-        pass
+    def __init__(self, llm_integration: Optional[LLMIntegration] = None):
+        """
+        Initialize the tutor agent.
+        
+        Args:
+            llm_integration: Optional LLM integration (creates new if not provided)
+        """
+        self.llm = llm_integration or LLMIntegration()
     
     async def explain_decision(
         self,
@@ -47,6 +53,8 @@ class TutorAgent:
     ) -> TutorExplanation:
         """
         Explain an AdvisorDecision in educational terms.
+        
+        Tries LLM first (if available), falls back to template-based explanation.
         
         Args:
             decision: The advisor decision to explain
@@ -60,6 +68,111 @@ class TutorAgent:
         - No new recommendations are introduced
         - No decisions are overridden
         - Only explains existing decision and proposal
+        """
+        # Try LLM first (if available)
+        llm_explanation = await self._try_llm_explanation(decision, financial_state)
+        
+        if llm_explanation:
+            # LLM generated valid explanation, use it
+            # Still generate teaching points from templates (they're safe)
+            teaching_points = []
+            guardrail_references = []
+            proposal_referenced = False
+            
+            guardrail_status = decision.metadata.get("guardrail_status")
+            guardrail_reasons = decision.metadata.get("guardrail_reasons", [])
+            
+            if guardrail_status and guardrail_status != GuardrailStatus.ALLOW.value:
+                guardrail_references.extend(guardrail_reasons)
+                for reason_code in guardrail_reasons:
+                    teaching_point = self._create_guardrail_teaching_point(reason_code)
+                    if teaching_point:
+                        teaching_points.append(teaching_point)
+            
+            if decision.proposal:
+                proposal_referenced = True
+                proposal_teaching = self._create_proposal_teaching_points(decision.proposal)
+                teaching_points.extend(proposal_teaching)
+            
+            general_teaching = self._create_general_teaching_points(financial_state, decision)
+            teaching_points.extend(general_teaching)
+            
+            return TutorExplanation(
+                explanation_text=llm_explanation,
+                teaching_points=teaching_points,
+                guardrail_references=guardrail_references,
+                proposal_referenced=proposal_referenced
+            )
+        
+        # Fallback to template-based explanation
+        return await self._explain_with_templates(decision, financial_state)
+    
+    async def _try_llm_explanation(
+        self,
+        decision: AdvisorDecision,
+        financial_state: FinancialState
+    ) -> Optional[str]:
+        """
+        Try to generate explanation using LLM.
+        
+        Returns explanation text if successful, None if LLM unavailable or fails validation.
+        """
+        if not self.llm.is_available():
+            return None
+        
+        # Build summaries for LLM
+        decision_summary = {
+            "decision_type": decision.decision.value,
+            "status": "approved" if decision.decision.value == "approve" else decision.decision.value
+        }
+        
+        financial_state_summary = {
+            "emergency_fund_months": financial_state.emergency_fund_months,
+            "net_cashflow": financial_state.cashflow.net_cashflow
+        }
+        
+        guardrail_info = None
+        guardrail_status = decision.metadata.get("guardrail_status")
+        guardrail_reasons = decision.metadata.get("guardrail_reasons", [])
+        if guardrail_status and guardrail_reasons:
+            guardrail_info = {
+                "status": guardrail_status,
+                "reasons": [
+                    {"code": code, "message": self._get_reason_description(code)}
+                    for code in guardrail_reasons
+                ]
+            }
+        
+        proposal_info = None
+        if decision.proposal:
+            proposal_info = {
+                "allocation": {
+                    "stocks": decision.proposal.target_allocation.stocks,
+                    "bonds": decision.proposal.target_allocation.bonds,
+                    "cash": decision.proposal.target_allocation.cash,
+                    "other": decision.proposal.target_allocation.other
+                },
+                "trade_count": len(decision.proposal.trades) if decision.proposal.trades else 0,
+                "risk_delta": decision.proposal.risk_delta
+            }
+        
+        # Try LLM generation
+        return await self.llm.generate_explanation(
+            decision_summary=decision_summary,
+            financial_state_summary=financial_state_summary,
+            guardrail_info=guardrail_info,
+            proposal_info=proposal_info
+        )
+    
+    async def _explain_with_templates(
+        self,
+        decision: AdvisorDecision,
+        financial_state: FinancialState
+    ) -> TutorExplanation:
+        """
+        Generate explanation using template-based approach (fallback).
+        
+        This is the original template-based implementation.
         """
         explanation_parts = []
         teaching_points = []
