@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Financial Advisor | Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <div class="logo-icon">💼</div>
+                    <h1>Financial Advisor</h1>
+                </div>
+            </div>
+            
+            <nav class="sidebar-nav">
+                <a href="#dashboard" class="nav-item active" onclick="showSection('dashboard')">
+                    <span class="nav-icon">📊</span>
+                    <span>Dashboard</span>
+                </a>
+                <a href="#recommendations" class="nav-item" onclick="showSection('recommendations')">
+                    <span class="nav-icon">💡</span>
+                    <span>Recommendations</span>
+                </a>
+                <a href="#explain" class="nav-item" onclick="showSection('explain')">
+                    <span class="nav-icon">💬</span>
+                    <span>Explanations</span>
+                </a>
+                <a href="#profile" class="nav-item" onclick="showSection('profile')">
+                    <span class="nav-icon">👤</span>
+                    <span>Profile</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="auth-status" id="authStatusBadge">
+                    <span class="status-dot"></span>
+                    <span>Not authenticated</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Top Bar -->
+            <header class="top-bar">
+                <div class="top-bar-content">
+                    <h2 class="page-title" id="pageTitle">Dashboard</h2>
+                    <div class="auth-controls">
+                        <input 
+                            type="password" 
+                            id="tokenInput" 
+                            class="token-input" 
+                            placeholder="Enter Bearer token"
+                        />
+                        <button class="btn btn-primary" onclick="setToken()">Set Token</button>
+                        <button class="btn btn-secondary" onclick="checkAuth()">Verify</button>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Dashboard Section -->
+            <section id="dashboard" class="content-section active">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon">👤</div>
+                        <div class="stat-content">
+                            <h3>User ID</h3>
+                            <p id="statUserId" class="stat-value">-</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">📧</div>
+                        <div class="stat-content">
+                            <h3>Email</h3>
+                            <p id="statEmail" class="stat-value">-</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">💼</div>
+                        <div class="stat-content">
+                            <h3>Broker Status</h3>
+                            <p id="statBroker" class="stat-value">-</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">📊</div>
+                        <div class="stat-content">
+                            <h3>Latest Recommendation</h3>
+                            <p id="statRecommendation" class="stat-value">-</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="action-cards">
+                    <div class="action-card">
+                        <div class="action-icon">✨</div>
+                        <h3>Generate Recommendation</h3>
+                        <p>Create a new investment recommendation based on your financial profile</p>
+                        <button class="btn btn-primary btn-block" onclick="generateRecommendation()">
+                            Generate Now
+                        </button>
+                    </div>
+                    <div class="action-card">
+                        <div class="action-icon">📋</div>
+                        <h3>View Latest</h3>
+                        <p>See your most recent investment recommendation and decision</p>
+                        <button class="btn btn-secondary btn-block" onclick="getLatestRecommendation()">
+                            View Latest
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Recommendations Section -->
+            <section id="recommendations" class="content-section">
+                <div class="section-header">
+                    <h2>Investment Recommendations</h2>
+                    <button class="btn btn-primary" onclick="generateRecommendation()">
+                        + New Recommendation
+                    </button>
+                </div>
+                
+                <div class="recommendation-card" id="recommendationCard">
+                    <div class="empty-state">
+                        <div class="empty-icon">📊</div>
+                        <h3>No recommendation loaded</h3>
+                        <p>Generate a new recommendation or load your latest one</p>
+                        <div class="empty-actions">
+                            <button class="btn btn-primary" onclick="generateRecommendation()">Generate</button>
+                            <button class="btn btn-secondary" onclick="getLatestRecommendation()">Load Latest</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Explain Section -->
+            <section id="explain" class="content-section">
+                <div class="section-header">
+                    <h2>Get Explanation</h2>
+                    <button class="btn btn-primary" onclick="getExplanation()">
+                        Explain Latest
+                    </button>
+                </div>
+                
+                <div class="explanation-card" id="explanationCard">
+                    <div class="empty-state">
+                        <div class="empty-icon">💬</div>
+                        <h3>No explanation yet</h3>
+                        <p>Click "Explain Latest" to get an explanation of your recommendation</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Profile Section -->
+            <section id="profile" class="content-section">
+                <div class="section-header">
+                    <h2>Your Profile</h2>
+                    <button class="btn btn-secondary" onclick="loadUserInfo()">
+                        Refresh
+                    </button>
+                </div>
+                
+                <div class="profile-card" id="profileCard">
+                    <div class="empty-state">
+                        <div class="empty-icon">👤</div>
+                        <h3>Profile not loaded</h3>
+                        <p>Click "Refresh" to load your profile information</p>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>

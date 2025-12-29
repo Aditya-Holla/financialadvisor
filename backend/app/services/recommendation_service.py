@@ -259,9 +259,11 @@ class RecommendationService:
             Recommendation data dictionary
         """
         import json
+        import uuid
         from datetime import datetime, timezone
         
         rec_data = {
+            "id": str(uuid.uuid4()),  # Generate unique ID
             "decision": decision.decision.value,
             "decision_json": json.dumps(decision.model_dump()),
             "proposal_json": json.dumps(decision.proposal.model_dump()) if decision.proposal else None,
