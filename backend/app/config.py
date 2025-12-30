@@ -10,39 +10,54 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # Load .env file from backend directory
 backend_dir = Path(__file__).parent.parent
 env_file = backend_dir / ".env"
+env_example_file = backend_dir / ".env.example"
 
-# Debug: Check if .env file exists
+# Explicitly check and load ONLY .env (not .env.example)
 if env_file.exists():
-    # Read file directly to debug
+    # Load .env file with explicit path and override
+    result = load_dotenv(dotenv_path=str(env_file.resolve()), override=True)
+    print(f"✓ Loaded .env from: {env_file.resolve()}")
+    print(f"  File exists: {env_file.exists()}")
+    print(f"  Absolute path: {env_file.resolve()}")
+    
+    # Read file directly to verify contents
     try:
         with open(env_file, 'r', encoding='utf-8') as f:
             lines = f.readlines()
-            print(f"Reading .env file ({len(lines)} lines):")
+            print(f"  File has {len(lines)} lines")
+            # Check for placeholder values
             for i, line in enumerate(lines, 1):
                 line_stripped = line.rstrip('\n\r')
-                if 'LLM' in line or 'SUPABASE' in line:
-                    # Show first 50 chars to avoid printing full keys
-                    preview = line_stripped[:50] + ('...' if len(line_stripped) > 50 else '')
-                    print(f"  Line {i}: {repr(preview)}")
+                if 'LLM_API_KEY' in line and ('your-' in line.lower() or 'placeholder' in line.lower()):
+                    print(f"  ⚠ WARNING: Line {i} appears to have placeholder value!")
+                    preview = line_stripped[:60] + ('...' if len(line_stripped) > 60 else '')
+                    print(f"    {preview}")
     except Exception as e:
-        print(f"Error reading .env file: {e}")
-    
-    # Load .env file
-    result = load_dotenv(dotenv_path=env_file, override=True)
-    print(f"load_dotenv result: {result}, env_file: {env_file}")
-    
-    # Debug: Check what's actually in the environment after loading
-    llm_key = os.getenv("LLM_API_KEY")
-    supabase_url = os.getenv("SUPABASE_URL")
-    supabase_key = os.getenv("SUPABASE_KEY")
-    
-    print(f"After load_dotenv:")
-    print(f"  SUPABASE_URL: {'✓' if supabase_url else '✗'}")
-    print(f"  SUPABASE_KEY: {'✓' if supabase_key else '✗'} ({'first 10: ' + supabase_key[:10] + '...' if supabase_key else ''})")
-    print(f"  LLM_API_KEY: {'✓' if llm_key else '✗'} ({'first 10: ' + llm_key[:10] + '...' if llm_key else ''})")
-    print(f"  LLM_MODEL: {os.getenv('LLM_MODEL', 'NOT SET')}")
+        print(f"  Error reading .env file: {e}")
 else:
-    print(f"⚠ .env file not found at {env_file}")
+    print(f"⚠ .env file not found at {env_file.resolve()}")
+    if env_example_file.exists():
+        print(f"⚠ .env.example exists - copy it to .env and add your values")
+
+# Debug: Check what's actually in the environment after loading
+llm_key = os.getenv("LLM_API_KEY")
+supabase_url = os.getenv("SUPABASE_URL")
+supabase_key = os.getenv("SUPABASE_KEY")
+
+print(f"After load_dotenv:")
+print(f"  SUPABASE_URL: {'✓' if supabase_url else '✗'}")
+if supabase_url:
+    print(f"    Value: {supabase_url[:50]}...")
+print(f"  SUPABASE_KEY: {'✓' if supabase_key else '✗'}")
+if supabase_key:
+    print(f"    Starts with: {supabase_key[:20]}...")
+print(f"  LLM_API_KEY: {'✓' if llm_key else '✗'}")
+if llm_key:
+    print(f"    Starts with: {llm_key[:20]}...")
+    # Check if it's a placeholder
+    if llm_key.startswith("your-") or "placeholder" in llm_key.lower():
+        print(f"    ⚠ WARNING: LLM_API_KEY appears to be a placeholder!")
+print(f"  LLM_MODEL: {os.getenv('LLM_MODEL', 'NOT SET')}")
 
 
 class Settings(BaseSettings):
