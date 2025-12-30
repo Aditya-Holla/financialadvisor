@@ -20,6 +20,7 @@ from app.agents.schemas import (
 )
 from app.repositories import profiles_repo, snapshots_repo, recommendations_repo
 from app.models.errors import NotFoundError, ExternalServiceError
+from app.services.mystockdna_service import MyStockDNAService
 
 
 class RecommendationService:
@@ -244,10 +245,10 @@ class RecommendationService:
             profile: User profile
             
         Returns:
-            PortfolioProposal from myStockDNA model, or None if model unavailable
+            PortfolioProposal from myStockDNA service, or None if service unavailable
             
         Note:
-            Phase 2: This will call myStockDNA service to generate proposals.
+            Phase 2: Calls myStockDNA service to generate proposals.
             myStockDNA models are responsible for:
             - Portfolio optimization
             - Allocation targets
@@ -258,16 +259,19 @@ class RecommendationService:
             - Communicate with users
             - Enforce personal finance constraints
             - Execute trades autonomously
-            
-            For now, returns None and OrchestratorAgent creates a stub proposal.
         """
-        # TODO (Phase 2): Call myStockDNA service
-        # from app.services.mystockdna_service import MyStockDNAService
-        # service = MyStockDNAService()
-        # return await service.generate_proposal(financial_state, user_intent, profile)
-        
-        # For now, return None to let orchestrator create a stub
-        return None
+        try:
+            service = MyStockDNAService()
+            proposal = await service.generate_proposal(financial_state, user_intent, profile)
+            return proposal
+        except ExternalServiceError:
+            # If myStockDNA service fails, return None and let orchestrator create stub
+            # This provides fallback behavior
+            return None
+        except Exception as e:
+            # Log unexpected errors but still return None for fallback
+            # In production, might want to log this
+            return None
     
     def _build_recommendation_data(
         self,
