@@ -30,11 +30,17 @@ class TutorAgent:
     - Describes portfolio proposals
     - Provides teaching points
     
+    Per the vision: "LLMs are used strictly for explaining recommendations,
+    teaching investment concepts, summarizing tradeoffs, and conversational
+    responses. LLMs do not decide allocations, enforce rules, predict markets,
+    or execute trades."
+    
     Safety constraints:
     - NEVER suggests new trades
     - NEVER overrides decisions
     - NEVER changes numbers
     - ONLY explains what already exists
+    - Uses LLMIntegration for explanations but validates output for safety
     """
     
     def __init__(self, llm_integration: Optional[LLMIntegration] = None):

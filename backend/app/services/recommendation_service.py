@@ -26,12 +26,18 @@ class RecommendationService:
     """
     Service for generating investment recommendations.
     
-    This service orchestrates the recommendation generation flow:
+    This service orchestrates the recommendation generation flow per the vision:
     1. Loads user profile and latest portfolio snapshot
-    2. Builds FinancialState and UserIntent
-    3. Calls model to get PortfolioProposal
-    4. Calls orchestrator.decide()
-    5. Stores recommendation in database
+    2. Builds FinancialState (canonical user financial state)
+    3. Builds UserIntent from request
+    4. Applies guardrails (pre-check: "Is investing appropriate?")
+    5. Calls myStockDNA service for PortfolioProposal (Phase 2 - currently stub)
+    6. Calls OrchestratorAgent.decide() to evaluate and make final decision
+    7. Stores recommendation in database
+    
+    The OrchestratorAgent (Boss Agent) coordinates guardrails, model proposals,
+    and generates explanations. This service handles the business logic of
+    loading data and coordinating the flow.
     """
     
     def __init__(self, orchestrator: Optional[OrchestratorAgent] = None):
@@ -82,18 +88,25 @@ class RecommendationService:
         # Step 3: Build UserIntent
         user_intent = self._build_user_intent(user_intent_data or {})
         
-        # Step 4: Call model to get PortfolioProposal
-        # TODO: Replace with actual model call
+        # Step 4: Pre-check guardrails (early exit if investing is inappropriate)
+        # Note: Full guardrail check happens in orchestrator, but we could add
+        # a quick pre-check here if needed for performance
+        
+        # Step 5: Call myStockDNA service to get PortfolioProposal
+        # TODO (Phase 2): Replace with actual myStockDNA service call
+        # For now, returns None and orchestrator creates stub proposal
         proposal = await self._get_model_proposal(financial_state, user_intent, profile)
         
-        # Step 5: Call orchestrator.decide()
+        # Step 6: Call OrchestratorAgent.decide() (Boss Agent)
+        # Orchestrator evaluates guardrails, re-applies constraints to proposal,
+        # and makes final decision with required confirmations
         decision = await self.orchestrator.decide(
             financial_state=financial_state,
             user_intent=user_intent,
             proposal=proposal
         )
         
-        # Step 6: Store recommendation
+        # Step 7: Store recommendation
         rec_data = self._build_recommendation_data(decision, financial_state, user_intent)
         stored_rec = recommendations_repo.create_recommendation(user_id, rec_data)
         
@@ -223,7 +236,7 @@ class RecommendationService:
         profile: Dict[str, Any]
     ) -> Optional[PortfolioProposal]:
         """
-        Get portfolio proposal from model.
+        Get portfolio proposal from myStockDNA model.
         
         Args:
             financial_state: User's financial state
@@ -231,13 +244,28 @@ class RecommendationService:
             profile: User profile
             
         Returns:
-            PortfolioProposal from model, or None if model unavailable
+            PortfolioProposal from myStockDNA model, or None if model unavailable
             
         Note:
-            This is a placeholder. In production, this would call the actual
-            model (LLM or other) to generate a proposal.
+            Phase 2: This will call myStockDNA service to generate proposals.
+            myStockDNA models are responsible for:
+            - Portfolio optimization
+            - Allocation targets
+            - Rebalance proposals
+            - Trade generation
+            
+            They operate independently of user interaction and do NOT:
+            - Communicate with users
+            - Enforce personal finance constraints
+            - Execute trades autonomously
+            
+            For now, returns None and OrchestratorAgent creates a stub proposal.
         """
-        # TODO: Implement actual model call
+        # TODO (Phase 2): Call myStockDNA service
+        # from app.services.mystockdna_service import MyStockDNAService
+        # service = MyStockDNAService()
+        # return await service.generate_proposal(financial_state, user_intent, profile)
+        
         # For now, return None to let orchestrator create a stub
         return None
     

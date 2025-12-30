@@ -30,10 +30,20 @@ class OrchestratorAgent:
     """
     Orchestrator agent that coordinates workflow between specialized agents.
     
-    This agent manages the flow of information between guardrail_agent,
-    tutor_agent, and other components without containing business logic.
+    This agent is the orchestrator and single voice of the system, equivalent to
+    the vision document's "Boss Agent" concept. It coordinates the complete
+    recommendation flow:
+    1. Loads user's FinancialState
+    2. Applies decision rules (guardrails)
+    3. Calls myStockDNA for proposed actions (Phase 2)
+    4. Re-applies constraints to proposed trades
+    5. Decides whether actions are allowed now
+    6. Generates an explanation plan
+    7. Asks for explicit user confirmation before execution
     
-    Note: This agent does NOT call Alpaca, DB, or LLM services.
+    This mirrors how real advisory firms operate: models propose, advisors judge.
+    
+    Note: This agent does NOT call Alpaca, DB, or LLM services directly.
     It only orchestrates between agents using deterministic logic.
     """
     
@@ -55,22 +65,28 @@ class OrchestratorAgent:
         """
         Make an advisor decision based on financial state, user intent, and proposal.
         
-        Flow:
-        1. Evaluate guardrails
+        This is the core decision-making method of the Orchestrator Agent (Boss Agent).
+        It follows the vision's flow:
+        1. Evaluate guardrails (pre-check: "Is investing appropriate?")
         2. If BLOCK -> return REJECT decision with explanation_inputs only
-        3. If ALLOW/WARN -> accept proposal (stub if needed) and return decision
+        3. If ALLOW/WARN -> evaluate proposal (from myStockDNA in Phase 2, stub for now)
+        4. Re-apply guardrails to proposal
+        5. Generate explanation plan and required confirmations
         
         Args:
-            financial_state: User's current financial state
+            financial_state: User's current financial state (canonical source of truth)
             user_intent: User's intent or request
-            proposal: Optional portfolio proposal from model (will create stub if needed)
+            proposal: Optional portfolio proposal from myStockDNA model
+                     (will create stub if needed, replaced in Phase 2)
             
         Returns:
-            AdvisorDecision with decision, proposal (if allowed), and explanation inputs
+            AdvisorDecision with decision, proposal (if allowed), explanation inputs,
+            and required confirmations
             
         Note:
             This method does NOT call Alpaca, DB, or LLM services.
-            It only orchestrates deterministic guardrail checks.
+            It only orchestrates deterministic guardrail checks and decision logic.
+            In Phase 2, this will call myStockDNA service before making final decision.
         """
         # Step 1: Evaluate guardrails
         guardrail_result = await self.guardrail_agent.validate(

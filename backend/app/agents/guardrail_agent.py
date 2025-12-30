@@ -25,17 +25,23 @@ from app.agents.schemas import (
 
 class GuardrailAgent:
     """
-    Guardrail agent for deterministic validation.
+    Guardrail agent for deterministic validation and safety checks.
     
     This agent performs deterministic validation checks. It does NOT use
     LLM to make decisions about numbers or trades. All validation logic
     is deterministic code.
     
-    Guardrail Rules:
+    Per the vision: "Financial safety and constraints are enforced in code,
+    not prompts. Rules before language."
+    
+    Guardrail Rules (from vision document):
     - Negative cash flow => BLOCK for "invest now" intents
     - Emergency fund months < 3 => WARN for risk increase, WARN/BLOCK for investing large amount
     - High-interest debt APR >= 15% and balance > 0 => WARN for investing lump sum
     - Goal timeframe < 12 months => WARN/BLOCK for equity-heavy recommendations
+    
+    These rules prevent reckless behavior, ensure consistency, and enable
+    the advisor to say no (a critical trust signal).
     """
     
     # Thresholds
