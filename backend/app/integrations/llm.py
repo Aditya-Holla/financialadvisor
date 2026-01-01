@@ -36,9 +36,14 @@ class LLMIntegration:
             try:
                 from openai import AsyncOpenAI
                 self.client = AsyncOpenAI(api_key=self.settings.LLM_API_KEY)
+                logger.info(f"OpenAI client initialized successfully with model: {self.settings.LLM_MODEL}")
             except ImportError:
                 # OpenAI package not installed, will fallback to templates
-                pass
+                logger.warning("OpenAI package not installed. Install with: pip install openai>=1.0.0")
+            except Exception as e:
+                logger.error(f"Failed to initialize OpenAI client: {str(e)}")
+        else:
+            logger.warning("LLM_API_KEY not configured in settings")
     
     def is_available(self) -> bool:
         """Check if LLM is available (API key and client configured)."""
@@ -253,6 +258,7 @@ Your explanations should be:
         text_lower = text.lower()
         
         # More precise unsafe patterns (avoid false positives)
+        # Made more specific to avoid catching explanatory/rephrasing text
         unsafe_patterns = [
             r'suggest.*new.*trade',  # Must be "new trade"
             r'recommend.*you.*buy',  # Must be "you buy"
@@ -264,7 +270,10 @@ Your explanations should be:
             r'change.*the.*allocation',  # Must be "the allocation"
             r'modify.*this.*proposal',  # Must be "this proposal"
             r'you.*should.*change',  # Direct instruction to change
-            r'i.*recommend.*different',  # Recommending something different
+            # More specific: require context about what's different (allocation, trades, strategy)
+            r'i.*recommend.*different.*(?:allocation|trades?|strategy|approach|mix|portfolio)',  # Recommending different allocation/trades
+            r'i.*would.*recommend.*different.*(?:allocation|trades?|strategy|approach|mix|portfolio)',  # Would recommend different
+            r'i.*suggest.*different.*(?:allocation|trades?|strategy|approach|mix|portfolio)',  # Suggest different
         ]
         
         for pattern in unsafe_patterns:

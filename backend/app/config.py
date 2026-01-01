@@ -69,7 +69,9 @@ class Settings(BaseSettings):
     
     # Supabase
     SUPABASE_URL: Optional[str] = None
-    SUPABASE_KEY: Optional[str] = None
+    SUPABASE_KEY: Optional[str] = None  # Secret key (replaces service_role)
+    SUPABASE_ANON_KEY: Optional[str] = None  # Publishable key for frontend
+    SUPABASE_JWT_SECRET: Optional[str] = None  # Legacy JWT secret (optional, for backward compatibility)
     
     # Alpaca (Paper Trading)
     ALPACA_KEY: Optional[str] = None

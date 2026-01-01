@@ -115,22 +115,53 @@ class GuardrailAgent:
                     highest_severity = GuardrailStatus.WARN
             
             # WARN/BLOCK for investing large amount
-            if user_intent.type == UserIntentType.INVEST and user_intent.amount is not None:
-                if user_intent.amount >= self.LARGE_INVESTMENT_THRESHOLD:
-                    reasons.append(GuardrailReason(
-                        code="LOW_EMERGENCY_FUND_LARGE_INVESTMENT",
-                        message=f"Emergency fund ({emergency_months:.1f} months) is below recommended minimum. Large investment (${user_intent.amount:,.0f}) not recommended.",
-                        severity="error"
-                    ))
-                    highest_severity = GuardrailStatus.BLOCK
-                elif user_intent.amount > 0:
-                    reasons.append(GuardrailReason(
-                        code="LOW_EMERGENCY_FUND_INVESTMENT",
-                        message=f"Emergency fund ({emergency_months:.1f} months) is below recommended minimum. Consider building emergency fund first.",
-                        severity="warning"
-                    ))
-                    if highest_severity == GuardrailStatus.ALLOW:
-                        highest_severity = GuardrailStatus.WARN
+            if user_intent.type == UserIntentType.INVEST:
+                # Check for percentage-based investments ("all", "everything", "100%")
+                is_percentage_based = user_intent.metadata.get("percentage_based", False)
+                
+                if is_percentage_based:
+                    # User wants to invest all/everything - check if it would leave emergency fund < 3 months
+                    cash_balance = financial_state.portfolio_summary.cash_balance
+                    monthly_expenses = financial_state.cashflow.monthly_expenses
+                    
+                    if monthly_expenses > 0:
+                        # Calculate emergency fund after investing all cash
+                        remaining_cash = 0.0
+                        emergency_months_after = remaining_cash / monthly_expenses
+                        
+                        if emergency_months_after < self.EMERGENCY_FUND_MIN_MONTHS:
+                            reasons.append(GuardrailReason(
+                                code="LOW_EMERGENCY_FUND_INVEST_ALL",
+                                message=f"Investing all available cash (${cash_balance:,.0f}) would leave emergency fund at {emergency_months_after:.1f} months, below recommended minimum (3 months). Consider keeping some cash for emergencies.",
+                                severity="error"
+                            ))
+                            highest_severity = GuardrailStatus.BLOCK
+                        elif emergency_months_after < self.EMERGENCY_FUND_MIN_MONTHS * 1.5:  # Less than 4.5 months
+                            reasons.append(GuardrailReason(
+                                code="LOW_EMERGENCY_FUND_INVEST_ALL_WARN",
+                                message=f"Investing all available cash would leave emergency fund at {emergency_months_after:.1f} months. Consider keeping some cash for emergencies.",
+                                severity="warning"
+                            ))
+                            if highest_severity == GuardrailStatus.ALLOW:
+                                highest_severity = GuardrailStatus.WARN
+                
+                # Check for specific dollar amounts
+                elif user_intent.amount is not None:
+                    if user_intent.amount >= self.LARGE_INVESTMENT_THRESHOLD:
+                        reasons.append(GuardrailReason(
+                            code="LOW_EMERGENCY_FUND_LARGE_INVESTMENT",
+                            message=f"Emergency fund ({emergency_months:.1f} months) is below recommended minimum. Large investment (${user_intent.amount:,.0f}) not recommended.",
+                            severity="error"
+                        ))
+                        highest_severity = GuardrailStatus.BLOCK
+                    elif user_intent.amount > 0:
+                        reasons.append(GuardrailReason(
+                            code="LOW_EMERGENCY_FUND_INVESTMENT",
+                            message=f"Emergency fund ({emergency_months:.1f} months) is below recommended minimum. Consider building emergency fund first.",
+                            severity="warning"
+                        ))
+                        if highest_severity == GuardrailStatus.ALLOW:
+                            highest_severity = GuardrailStatus.WARN
         
         # Rule 3: High-interest debt APR >= 15% and balance > 0 => WARN for investing lump sum
         # Assume credit card debt is high-interest (typically 15%+)
@@ -143,8 +174,11 @@ class GuardrailAgent:
         computed_values["debt_apr"] = debt_apr
         
         if debt_apr >= self.HIGH_INTEREST_DEBT_APR_THRESHOLD and credit_card_debt > 0:
-            if user_intent.type == UserIntentType.INVEST and user_intent.amount is not None:
-                if user_intent.amount >= self.LARGE_INVESTMENT_THRESHOLD:
+            if user_intent.type == UserIntentType.INVEST:
+                is_percentage_based = user_intent.metadata.get("percentage_based", False)
+                
+                # Check for percentage-based or large investments
+                if is_percentage_based or user_intent.amount is None or user_intent.amount >= self.LARGE_INVESTMENT_THRESHOLD:
                     reasons.append(GuardrailReason(
                         code="HIGH_INTEREST_DEBT_LUMP_SUM",
                         message=f"High-interest debt (${credit_card_debt:,.0f} at {debt_apr:.1f}% APR) detected. Consider paying down debt before investing large amounts.",
