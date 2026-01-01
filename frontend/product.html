@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RoboAdvisor - Chat with Your Financial Advisor</title>
+    <link rel="stylesheet" href="product.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="logo">
+                <div class="logo-icon">💼</div>
+                <span class="logo-text">RoboAdvisor</span>
+            </div>
+            <div class="nav-links">
+                <a href="landing.html" class="nav-link">Home</a>
+                <a href="index.html" class="nav-link">Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="app-container">
+        <!-- Chat Interface -->
+        <div class="chat-container">
+            <div class="chat-header">
+                <div class="chat-header-content">
+                    <div class="advisor-avatar">
+                        <div class="avatar-icon">🤖</div>
+                    </div>
+                    <div class="advisor-info">
+                        <h2 class="advisor-name">Your Financial Advisor</h2>
+                        <p class="advisor-status">
+                            <span class="status-dot online"></span>
+                            <span id="userEmail">Loading...</span>
+                        </p>
+                    </div>
+                </div>
+                <div class="chat-actions">
+                    <button class="btn-icon" id="switchUserBtn" title="Switch User">
+                        🔄
+                    </button>
+                    <button class="btn-icon" id="clearChatBtn" title="Clear Chat">
+                        🗑️
+                    </button>
+                </div>
+            </div>
+
+            <!-- Messages Container -->
+            <div class="messages-container" id="messagesContainer">
+                <div class="welcome-message">
+                    <div class="welcome-content">
+                        <h3>Welcome! 👋</h3>
+                        <p>I'm your financial advisor. I can help you with:</p>
+                        <ul>
+                            <li>💬 Answering financial questions</li>
+                            <li>📊 Generating investment recommendations</li>
+                            <li>🎓 Explaining financial concepts</li>
+                            <li>🛡️ Understanding safety guardrails</li>
+                        </ul>
+                        <p class="welcome-examples">
+                            <strong>Try asking:</strong><br>
+                            "What is a good emergency fund?"<br>
+                            "I want to invest $5,000"<br>
+                            "Explain my latest recommendation"
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Input Area -->
+            <div class="input-container">
+                <div class="input-wrapper">
+                    <input 
+                        type="text" 
+                        id="messageInput" 
+                        class="message-input" 
+                        placeholder="Type your message here..."
+                        autocomplete="off"
+                    />
+                    <button id="sendButton" class="send-button" disabled>
+                        <span class="send-icon">➤</span>
+                    </button>
+                </div>
+                <div class="input-footer">
+                    <span class="input-hint">Press Enter to send, Shift+Enter for new line</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sidebar (Optional - for showing recommendations/details) -->
+        <div class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h3>Recommendation Details</h3>
+                <button class="btn-icon" id="closeSidebarBtn">✕</button>
+            </div>
+            <div class="sidebar-content" id="sidebarContent">
+                <!-- Recommendation details will be shown here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner"></div>
+        <p>Processing your request...</p>
+    </div>
+
+    <!-- Supabase Configuration -->
+    <!-- IMPORTANT: Create a config.js file with your Supabase credentials -->
+    <!-- See config.example.js for instructions -->
+    <script src="config.js" onerror="console.warn('config.js not found. Please create it with your Supabase credentials.')"></script>
+    
+    <!-- Supabase JS -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="product.js"></script>
+</body>
+</html>
+
