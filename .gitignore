@@ -2,3 +2,6 @@
 __pycache__/
 *.pyc
 .env
+
+# Frontend config (contains sensitive credentials)
+frontend/config.js

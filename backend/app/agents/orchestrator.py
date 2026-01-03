@@ -7,6 +7,20 @@ Rules of Engagement:
 - Guardrails must be deterministic code, not LLM decisions
 - All model outputs must be structured JSON (Pydantic models)
 - Agents coordinate between integrations, services, and repositories
+
+Orchestrator Responsibilities:
+- Receives user input (financial_state, user_intent, optional proposal)
+- Classifies user intent (extracted from UserIntent type)
+- Calls guardrail agent FIRST for validation
+- Routes request based on guardrail decision
+- Aggregates agent responses into final output
+
+Hard Constraints:
+- MUST NOT give financial advice
+- MUST NOT explain stocks, markets, or investing concepts
+- MUST NOT recommend securities or strategies
+- MUST NOT override or second-guess guardrail decisions
+- Acts as a traffic controller, not a reasoning agent
 """
 
 from typing import Optional, List
@@ -30,8 +44,23 @@ class OrchestratorAgent:
     """
     Orchestrator agent that coordinates workflow between specialized agents.
     
-    This agent manages the flow of information between guardrail_agent,
-    tutor_agent, and other components without containing business logic.
+    This agent acts as a traffic controller that:
+    1. Receives user input (financial_state, user_intent, optional proposal)
+    2. Classifies user intent from UserIntent type
+    3. Calls guardrail agent FIRST for validation
+    4. Routes request based on guardrail decision:
+       - BLOCK -> REJECT decision
+       - WARN -> MODIFY decision (if proposal provided)
+       - ALLOW -> APPROVE decision (if proposal provided)
+       - Missing proposal -> REQUEST_INFO decision
+    5. Aggregates agent responses into final output
+    
+    This agent does NOT:
+    - Give financial advice
+    - Explain stocks, markets, or investing concepts
+    - Recommend securities or strategies
+    - Override guardrail decisions
+    - Create portfolio proposals
     
     Note: This agent does NOT call Alpaca, DB, or LLM services.
     It only orchestrates between agents using deterministic logic.
@@ -53,61 +82,158 @@ class OrchestratorAgent:
         proposal: Optional[PortfolioProposal] = None
     ) -> AdvisorDecision:
         """
-        Make an advisor decision based on financial state, user intent, and proposal.
+        Route request and aggregate agent responses into final decision.
         
-        Flow:
-        1. Evaluate guardrails
-        2. If BLOCK -> return REJECT decision with explanation_inputs only
-        3. If ALLOW/WARN -> accept proposal (stub if needed) and return decision
+        Routing Logic:
+        1. Classify user intent (from UserIntent.type)
+        2. Call guardrail agent FIRST for validation
+        3. Route based on guardrail decision:
+           - BLOCK -> REJECT (no proposal, override confirmations)
+           - WARN + proposal -> MODIFY (proposal with warnings)
+           - WARN_AND_EDUCATE + proposal -> MODIFY (intent-related warnings, requires education)
+           - ALLOW + proposal -> APPROVE (proposal approved)
+           - ALLOW/WARN/WARN_AND_EDUCATE + no proposal -> REQUEST_INFO (proposal needed)
         
         Args:
             financial_state: User's current financial state
-            user_intent: User's intent or request
-            proposal: Optional portfolio proposal from model (will create stub if needed)
+            user_intent: User's intent or request (intent classification extracted from type)
+            proposal: Optional portfolio proposal from model/service (NOT created here)
             
         Returns:
-            AdvisorDecision with decision, proposal (if allowed), and explanation inputs
+            AdvisorDecision with routing result, aggregated from guardrail and other agents
             
         Note:
-            This method does NOT call Alpaca, DB, or LLM services.
-            It only orchestrates deterministic guardrail checks.
+            This method does NOT:
+            - Create portfolio proposals (returns REQUEST_INFO if missing)
+            - Give financial advice
+            - Override guardrail decisions
+            - Call Alpaca, DB, or LLM services directly
         """
-        # Step 1: Evaluate guardrails
+        # Step 1: Classify user intent (extracted from UserIntent.type)
+        # Intent is already classified in the UserIntent object, no additional classification needed
+        
+        # Step 2: Call guardrail agent FIRST (hard requirement)
         guardrail_result = await self.guardrail_agent.validate(
             financial_state=financial_state,
             user_intent=user_intent,
             proposal=proposal
         )
         
-        # Step 2: If BLOCK -> return REJECT decision with override confirmations
+        # Step 3: Route based on guardrail decision
+        # Route: BLOCK -> REJECT
         if guardrail_result.status == GuardrailStatus.BLOCK:
-            explanation_inputs = self._build_explanation_inputs_from_guardrails(
-                guardrail_result,
-                financial_state,
-                user_intent
-            )
-            
-            # Build override confirmations for BLOCK
-            override_confirmations = self._build_confirmations_from_guardrails(guardrail_result)
-            
-            return AdvisorDecision(
-                decision=AdvisorDecisionType.REJECT,
-                proposal=None,  # No proposal when blocked
-                required_confirmations=override_confirmations,  # Override confirmations for BLOCK
-                explanation_inputs=explanation_inputs,
-                reasoning="Request blocked by guardrails. Override confirmations required to proceed.",
-                metadata={
-                    "guardrail_status": guardrail_result.status.value,
-                    "guardrail_reasons": [r.code for r in guardrail_result.reasons]
-                }
-            )
+            return self._route_block(guardrail_result, financial_state, user_intent)
         
-        # Step 3: If ALLOW/WARN -> accept proposal (stub if needed) and return decision
-        # Create stub proposal if none provided
+        # Route: Missing proposal -> REQUEST_INFO
         if proposal is None:
-            proposal = self._create_stub_proposal(user_intent, financial_state)
+            return self._route_request_info(guardrail_result, financial_state, user_intent)
         
-        # Build explanation inputs
+        # Route: ALLOW/WARN/WARN_AND_EDUCATE with proposal -> APPROVE/MODIFY
+        return self._route_allow_or_warn(guardrail_result, financial_state, user_intent, proposal)
+    
+    def _route_block(
+        self,
+        guardrail_result: GuardrailResult,
+        financial_state: FinancialState,
+        user_intent: UserIntent
+    ) -> AdvisorDecision:
+        """
+        Route BLOCK guardrail result to REJECT decision.
+        
+        This routing path returns a REJECT decision with no proposal,
+        override confirmations, and explanation inputs for the tutor agent.
+        
+        Args:
+            guardrail_result: Guardrail validation result with BLOCK status
+            financial_state: User's financial state
+            user_intent: User's intent
+            
+        Returns:
+            AdvisorDecision with REJECT decision type
+        """
+        explanation_inputs = self._build_explanation_inputs_from_guardrails(
+            guardrail_result,
+            financial_state,
+            user_intent
+        )
+        
+        override_confirmations = self._build_confirmations_from_guardrails(guardrail_result)
+        
+        return AdvisorDecision(
+            decision=AdvisorDecisionType.REJECT,
+            proposal=None,  # No proposal when blocked
+            required_confirmations=override_confirmations,
+            explanation_inputs=explanation_inputs,
+            reasoning="Request blocked by guardrails. Override confirmations required to proceed.",
+            metadata={
+                "guardrail_status": guardrail_result.status.value,
+                "guardrail_reasons": [r.code for r in guardrail_result.reasons]
+            }
+        )
+    
+    def _route_request_info(
+        self,
+        guardrail_result: GuardrailResult,
+        financial_state: FinancialState,
+        user_intent: UserIntent
+    ) -> AdvisorDecision:
+        """
+        Route missing proposal to REQUEST_INFO decision.
+        
+        This routing path is used when guardrails allow but no proposal
+        is provided. The orchestrator does NOT create proposals (that's
+        financial advice). Instead, it requests that a proposal be generated
+        by the appropriate service/agent.
+        
+        Args:
+            guardrail_result: Guardrail validation result (ALLOW, WARN, or WARN_AND_EDUCATE)
+            financial_state: User's financial state
+            user_intent: User's intent
+            
+        Returns:
+            AdvisorDecision with REQUEST_INFO decision type
+        """
+        explanation_inputs = self._build_explanation_inputs_from_guardrails(
+            guardrail_result,
+            financial_state,
+            user_intent
+        )
+        
+        return AdvisorDecision(
+            decision=AdvisorDecisionType.REQUEST_INFO,
+            proposal=None,  # No proposal available
+            required_confirmations=[],  # No confirmations needed yet
+            explanation_inputs=explanation_inputs,
+            reasoning="Portfolio proposal is required but not provided. Please generate proposal first.",
+            metadata={
+                "guardrail_status": guardrail_result.status.value,
+                "guardrail_reasons": [r.code for r in guardrail_result.reasons],
+                "computed_values": guardrail_result.computed_values
+            }
+        )
+    
+    def _route_allow_or_warn(
+        self,
+        guardrail_result: GuardrailResult,
+        financial_state: FinancialState,
+        user_intent: UserIntent,
+        proposal: PortfolioProposal
+    ) -> AdvisorDecision:
+        """
+        Route ALLOW/WARN/WARN_AND_EDUCATE guardrail result with proposal to APPROVE/MODIFY decision.
+        
+        This routing path aggregates the guardrail result with the provided
+        proposal to create an APPROVE (ALLOW) or MODIFY (WARN/WARN_AND_EDUCATE) decision.
+        
+        Args:
+            guardrail_result: Guardrail validation result (ALLOW, WARN, or WARN_AND_EDUCATE)
+            financial_state: User's financial state
+            user_intent: User's intent
+            proposal: Portfolio proposal (provided by service/agent, not created here)
+            
+        Returns:
+            AdvisorDecision with APPROVE (ALLOW) or MODIFY (WARN/WARN_AND_EDUCATE) decision type
+        """
         explanation_inputs = self._build_explanation_inputs(
             guardrail_result,
             financial_state,
@@ -115,20 +241,24 @@ class OrchestratorAgent:
             proposal
         )
         
-        # Build required confirmations based on warnings
         required_confirmations = self._build_confirmations_from_guardrails(guardrail_result)
         
-        # Determine decision type
-        if guardrail_result.status == GuardrailStatus.WARN:
+        # Route: WARN/WARN_AND_EDUCATE -> MODIFY, ALLOW -> APPROVE
+        # WARN: Proposal/output validation warnings
+        # WARN_AND_EDUCATE: User intent evaluation warnings (requires education)
+        if guardrail_result.status in [GuardrailStatus.WARN, GuardrailStatus.WARN_AND_EDUCATE]:
             decision_type = AdvisorDecisionType.MODIFY
-            reasoning = "Proposal has warnings. Review guardrail results before proceeding."
+            if guardrail_result.status == GuardrailStatus.WARN_AND_EDUCATE:
+                reasoning = "Proposal has intent-related warnings requiring education. Review guardrail results before proceeding."
+            else:
+                reasoning = "Proposal has warnings. Review guardrail results before proceeding."
         else:
             decision_type = AdvisorDecisionType.APPROVE
             reasoning = "Proposal passes all guardrails."
         
         return AdvisorDecision(
             decision=decision_type,
-            proposal=proposal,
+            proposal=proposal,  # Pass through proposal from service/agent
             required_confirmations=required_confirmations,
             explanation_inputs=explanation_inputs,
             reasoning=reasoning,
@@ -139,57 +269,18 @@ class OrchestratorAgent:
             }
         )
     
-    def _create_stub_proposal(
-        self,
-        user_intent: UserIntent,
-        financial_state: FinancialState
-    ) -> PortfolioProposal:
-        """
-        Create a stub portfolio proposal when none is provided.
-        
-        This is a placeholder that should be replaced by actual model output
-        in production.
-        
-        Args:
-            user_intent: User's intent
-            financial_state: Financial state
-            
-        Returns:
-            Stub PortfolioProposal
-        """
-        from app.agents.schemas import AssetAllocation, Trade
-        
-        # Default allocation (can be improved based on intent)
-        allocation = AssetAllocation(stocks=60.0, bonds=30.0, cash=10.0, other=0.0)
-        
-        # Create stub trades if amount is specified
-        trades = []
-        if user_intent.amount and user_intent.amount > 0:
-            # Stub trade - in production this would come from model
-            trades.append(Trade(
-                symbol="SPY",  # Default to broad market ETF
-                action="BUY",
-                quantity=1,  # Placeholder
-                estimated_price=user_intent.amount,
-                estimated_total=user_intent.amount
-            ))
-        
-        return PortfolioProposal(
-            target_allocation=allocation,
-            trades=trades,
-            reason_codes=["STUB_PROPOSAL"],
-            risk_delta=0.0,
-            estimated_cost=user_intent.amount or 0.0,
-            metadata={"is_stub": True}
-        )
-    
     def _build_explanation_inputs_from_guardrails(
         self,
         guardrail_result: GuardrailResult,
         financial_state: FinancialState,
         user_intent: UserIntent
     ) -> List[ExplanationInput]:
-        """Build explanation inputs from guardrail results (for BLOCK case)."""
+        """
+        Aggregate explanation inputs from guardrail results (for BLOCK/REQUEST_INFO cases).
+        
+        This method only translates/aggregates existing data into explanation inputs.
+        It does NOT provide financial advice or explanations.
+        """
         inputs = []
         
         # Add guardrail status
@@ -236,7 +327,13 @@ class OrchestratorAgent:
         user_intent: UserIntent,
         proposal: PortfolioProposal
     ) -> List[ExplanationInput]:
-        """Build explanation inputs for ALLOW/WARN cases."""
+        """
+        Aggregate explanation inputs for ALLOW/WARN/WARN_AND_EDUCATE cases.
+        
+        This method only translates/aggregates existing data (guardrail results,
+        financial state, user intent, proposal) into explanation inputs for the
+        tutor agent. It does NOT provide financial advice or explanations.
+        """
         inputs = []
         
         # Add guardrail status
@@ -301,10 +398,14 @@ class OrchestratorAgent:
         guardrail_result: GuardrailResult
     ) -> List[RequiredConfirmation]:
         """
-        Build required confirmations based on guardrail warnings and blocks.
+        Aggregate required confirmations from guardrail results.
         
-        Rules:
-        - WARN → require user confirmation checkbox text
+        This method translates guardrail warnings/blocks into confirmation
+        requirements. It does NOT provide financial advice.
+        
+        Routing rules:
+        - WARN → require user confirmation checkbox text (proposal validation warnings)
+        - WARN_AND_EDUCATE → require user confirmation checkbox text (intent evaluation warnings)
         - BLOCK → require explicit override acknowledgement text
         """
         confirmations = []
@@ -323,8 +424,10 @@ class OrchestratorAgent:
                         confirmation_text=None,  # BLOCK doesn't use checkbox
                         override_acknowledgement=override_text
                     ))
-        elif guardrail_result.status == GuardrailStatus.WARN:
-            # WARN requires checkbox confirmation
+        elif guardrail_result.status in [GuardrailStatus.WARN, GuardrailStatus.WARN_AND_EDUCATE]:
+            # WARN/WARN_AND_EDUCATE requires checkbox confirmation
+            # WARN: Proposal validation warnings
+            # WARN_AND_EDUCATE: Intent evaluation warnings (requires education)
             for reason in guardrail_result.reasons:
                 if reason.severity == "warning":
                     confirmation_type = self._get_confirmation_type_from_reason(reason.code)
@@ -335,13 +438,17 @@ class OrchestratorAgent:
                         message=reason.message,
                         required=True,
                         confirmation_text=checkbox_text,
-                        override_acknowledgement=None  # WARN doesn't use override
+                        override_acknowledgement=None  # WARN/WARN_AND_EDUCATE doesn't use override
                     ))
         
         return confirmations
     
     def _get_confirmation_type_from_reason(self, reason_code: str) -> str:
-        """Map guardrail reason code to confirmation type."""
+        """
+        Map guardrail reason code to confirmation type.
+        
+        This is a pure routing/translation function with no financial advice.
+        """
         mapping = {
             "LOW_EMERGENCY_FUND_RISK_INCREASE": "risk_acknowledgment",
             "LOW_EMERGENCY_FUND_INVESTMENT": "emergency_fund_acknowledgment",
@@ -353,7 +460,12 @@ class OrchestratorAgent:
         return mapping.get(reason_code, "general_acknowledgment")
     
     def _get_confirmation_checkbox_text(self, reason_code: str, reason_message: str) -> str:
-        """Get checkbox text for WARN confirmations."""
+        """
+        Get checkbox text for WARN confirmations.
+        
+        This method translates guardrail reason codes into user-facing
+        confirmation text. It does NOT provide financial advice.
+        """
         # Generate checkbox text based on reason
         checkbox_texts = {
             "LOW_EMERGENCY_FUND_RISK_INCREASE": "I understand my emergency fund is below recommended levels and want to proceed",
@@ -364,7 +476,12 @@ class OrchestratorAgent:
         return checkbox_texts.get(reason_code, f"I understand: {reason_message}")
     
     def _get_override_acknowledgement_text(self, reason_code: str, reason_message: str) -> str:
-        """Get explicit override acknowledgement text for BLOCK confirmations."""
+        """
+        Get explicit override acknowledgement text for BLOCK confirmations.
+        
+        This method translates guardrail reason codes into user-facing
+        override acknowledgement text. It does NOT provide financial advice.
+        """
         # Generate override text that user must explicitly acknowledge
         override_texts = {
             "NEGATIVE_CASHFLOW_INVEST": "I acknowledge that I have negative cash flow and explicitly override the safety guardrail to proceed with this investment",
@@ -375,15 +492,22 @@ class OrchestratorAgent:
     
     async def orchestrate(self, request: AgentRequest) -> AgentResponse:
         """
-        Orchestrate agent workflow.
+        Orchestrate agent workflow (general purpose routing).
+        
+        This method provides a general-purpose orchestration entry point.
+        For decision-making flows, use decide() instead.
         
         Args:
             request: Agent request with context
             
         Returns:
             AgentResponse with orchestration result
+            
+        Note:
+            This method routes requests but does NOT provide financial advice.
         """
-        # TODO: Implement orchestration logic
+        # TODO: Implement orchestration logic for general agent workflows
+        # This would route to appropriate agents based on request type
         return AgentResponse(
             success=False,
             message="Orchestrator not yet implemented",

@@ -1,4 +1,4 @@
-"""Recommendation service for generating investment recommendations.
+"""Recommendation service for generating portfolio allocation examples.
 
 Rules of Engagement:
 - Agents are separate from FastAPI routers and services
@@ -7,6 +7,16 @@ Rules of Engagement:
 - Guardrails must be deterministic code, not LLM decisions
 - All model outputs must be structured JSON (Pydantic models)
 - Agents coordinate between integrations, services, and repositories
+
+Service Constraints:
+- ONLY executes when user explicitly requests recommendations
+- ONLY executes when guardrail has already returned ALLOW (enforced by ChatService + Orchestrator)
+- All outputs framed as examples, educational illustrations, trade-offs
+- Avoids imperative or directive language
+- Does NOT present outputs as personalized financial advice
+
+This service trusts ChatService + Orchestrator to enforce safety.
+Its responsibility starts ONLY after guardrail approval.
 """
 
 from typing import Optional, Dict, Any
@@ -24,17 +34,32 @@ from app.models.errors import NotFoundError, ExternalServiceError
 
 class RecommendationService:
     """
-    Service for generating investment recommendations.
+    Service for generating portfolio allocation examples and educational illustrations.
     
-    This service orchestrates the recommendation generation flow:
-    1. Loads user profile and latest portfolio snapshot
-    2. Builds FinancialState and UserIntent
-    3. Calls model to get PortfolioProposal
-    4. Calls orchestrator.decide()
-    5. Stores recommendation in database
+    This service provides educational portfolio allocation examples that:
+    - Are only generated when user explicitly requests recommendations
+    - Are only generated when guardrail has already returned ALLOW (enforced upstream)
+    - Are framed as examples, educational illustrations, and trade-offs
+    - Avoid imperative or directive language
+    - Do NOT present as personalized financial advice
+    
+    This service trusts ChatService + Orchestrator to enforce safety.
+    It assumes guardrail has already returned ALLOW before this service is called.
+    Its responsibility starts ONLY after guardrail approval.
+    
+    Flow:
+    1. Validates user intent explicitly requests recommendations
+    2. Loads user profile and latest portfolio snapshot
+    3. Builds FinancialState and UserIntent
+    4. Calls model to get PortfolioProposal (as example)
+    5. Calls orchestrator.decide() (orchestrator will validate with guardrail)
+    6. Stores result in database (framed as educational example)
     """
     
-    def __init__(self, orchestrator: Optional[OrchestratorAgent] = None):
+    def __init__(
+        self,
+        orchestrator: Optional[OrchestratorAgent] = None
+    ):
         """
         Initialize recommendation service.
         
@@ -49,20 +74,41 @@ class RecommendationService:
         user_intent_data: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Generate a recommendation for the user.
+        Generate a portfolio allocation example for educational purposes.
+        
+        This method assumes:
+        1. User explicitly requests recommendations (GET_ADVICE or INVEST intent)
+        2. Guardrail has already returned ALLOW (enforced by ChatService + Orchestrator)
+        
+        This service trusts ChatService + Orchestrator to enforce safety.
+        It does NOT perform its own guardrail checks.
+        
+        All outputs are framed as examples, educational illustrations, and trade-offs.
+        They are NOT personalized financial advice.
         
         Args:
             user_id: User ID
-            user_intent_data: Optional user intent data (defaults to INVEST intent)
+            user_intent_data: Optional user intent data (must explicitly request recommendations)
             
         Returns:
-            Recommendation data dictionary
+            Recommendation data dictionary (framed as educational example)
             
         Raises:
             NotFoundError: If profile or snapshot not found
             ExternalServiceError: If database or service operations fail
         """
-        # Step 1: Load profile and latest snapshot
+        # Step 1: Build UserIntent to check if user explicitly requests recommendations
+        user_intent = self._build_user_intent(user_intent_data or {})
+        
+        # Defensive check: User must explicitly request recommendations
+        if not self._is_explicit_recommendation_request(user_intent):
+            raise ExternalServiceError(
+                "This service only generates examples when user explicitly requests recommendations. "
+                "Use appropriate intent type (GET_ADVICE or INVEST).",
+                "INTENT_NOT_RECOMMENDATION_REQUEST"
+            )
+        
+        # Step 2: Load profile and latest snapshot
         profile = profiles_repo.get_profile(user_id)
         if not profile:
             raise NotFoundError("User profile not found", "PROFILE_NOT_FOUND")
@@ -71,7 +117,7 @@ class RecommendationService:
         if not snapshot:
             raise NotFoundError("Portfolio snapshot not found", "SNAPSHOT_NOT_FOUND")
         
-        # Step 2: Build FinancialState
+        # Step 3: Build FinancialState
         # Capture timestamp at decision time for deterministic replay
         from datetime import datetime, timezone
         decision_timestamp = datetime.now(timezone.utc).isoformat()
@@ -79,25 +125,40 @@ class RecommendationService:
         # Override timestamp to ensure deterministic replay
         financial_state.timestamp = decision_timestamp
         
-        # Step 3: Build UserIntent
-        user_intent = self._build_user_intent(user_intent_data or {})
-        
-        # Step 4: Call model to get PortfolioProposal
-        # TODO: Replace with actual model call
+        # Step 4: Call model to get PortfolioProposal (as educational example)
+        # Note: Guardrail validation is handled by Orchestrator (called in Step 5)
         proposal = await self._get_model_proposal(financial_state, user_intent, profile)
         
         # Step 5: Call orchestrator.decide()
+        # Orchestrator will call guardrail agent FIRST to validate
+        # This service trusts that ChatService only calls it when guardrail returns ALLOW
         decision = await self.orchestrator.decide(
             financial_state=financial_state,
             user_intent=user_intent,
             proposal=proposal
         )
         
-        # Step 6: Store recommendation
+        # Step 6: Store recommendation (framed as educational example)
         rec_data = self._build_recommendation_data(decision, financial_state, user_intent)
         stored_rec = recommendations_repo.create_recommendation(user_id, rec_data)
         
         return stored_rec
+    
+    def _is_explicit_recommendation_request(self, user_intent: UserIntent) -> bool:
+        """
+        Check if user intent explicitly requests recommendations.
+        
+        This is a defensive check to ensure the service is only called
+        when user explicitly requests recommendations.
+        
+        Args:
+            user_intent: User intent to check
+            
+        Returns:
+            True if intent explicitly requests recommendations, False otherwise
+        """
+        # Only GET_ADVICE and INVEST intents are considered explicit recommendation requests
+        return user_intent.type in [UserIntentType.GET_ADVICE, UserIntentType.INVEST]
     
     def _build_financial_state(
         self,
@@ -223,22 +284,33 @@ class RecommendationService:
         profile: Dict[str, Any]
     ) -> Optional[PortfolioProposal]:
         """
-        Get portfolio proposal from model.
+        Get portfolio allocation example from model.
+        
+        This generates an educational example of portfolio allocation,
+        not a personalized recommendation. The output is framed as an
+        illustration of allocation concepts.
         
         Args:
-            financial_state: User's financial state
+            financial_state: User's financial state (for context only)
             user_intent: User's intent
-            profile: User profile
+            profile: User profile (for context only)
             
         Returns:
-            PortfolioProposal from model, or None if model unavailable
+            PortfolioProposal as educational example, or None if model unavailable
             
         Note:
             This is a placeholder. In production, this would call the actual
-            model (LLM or other) to generate a proposal.
+            model (LLM or other) to generate an educational example.
+            The model should be instructed to frame outputs as examples,
+            not personalized advice.
         """
-        # TODO: Implement actual model call
-        # For now, return None to let orchestrator create a stub
+        # TODO: Implement actual model call with educational framing
+        # Model should be instructed to:
+        # - Frame outputs as examples and illustrations
+        # - Explain trade-offs and considerations
+        # - Avoid imperative or directive language
+        # - Not present as personalized financial advice
+        # For now, return None to let orchestrator handle missing proposal
         return None
     
     def _build_recommendation_data(
@@ -250,13 +322,16 @@ class RecommendationService:
         """
         Build recommendation data dictionary for storage.
         
+        This data is stored as an educational example, not personalized advice.
+        All outputs are framed as examples, illustrations, and trade-offs.
+        
         Args:
-            decision: Advisor decision
-            financial_state: Financial state used
+            decision: Advisor decision (framed as educational example)
+            financial_state: Financial state used (for context)
             user_intent: User intent used
             
         Returns:
-            Recommendation data dictionary
+            Recommendation data dictionary (educational example)
         """
         import json
         import uuid
@@ -276,6 +351,9 @@ class RecommendationService:
             "created_at": datetime.now(timezone.utc).isoformat(),
             # Store evaluation timestamp for deterministic replay
             "evaluation_timestamp": financial_state.timestamp,
+            # Educational framing metadata
+            "is_educational_example": True,
+            "framing": "example_illustration_tradeoffs",
         }
         
         return rec_data

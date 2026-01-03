@@ -68,6 +68,7 @@ class LLMIntegration:
             - Falls back to None if validation fails
         """
         if not self.is_available():
+            logger.warning("LLM not available - client or API key missing")
             return None
         
         try:
@@ -110,8 +111,10 @@ class LLMIntegration:
                 return None
             
             # Validate no trade suggestions or decision overrides
-            if self._contains_unsafe_content(explanation):
-                logger.warning("LLM output contains unsafe content, using template fallback")
+            unsafe_reason = self._contains_unsafe_content(explanation)
+            if unsafe_reason:
+                logger.warning(f"LLM output contains unsafe content: {unsafe_reason}, using template fallback")
+                logger.debug(f"LLM output that triggered safety check: {explanation[:200]}...")
                 return None
             
             logger.info("LLM explanation validated successfully")
@@ -120,24 +123,30 @@ class LLMIntegration:
         except Exception as e:
             # Log the error for debugging
             logger.error(f"LLM call failed: {str(e)}", exc_info=True)
+            logger.error(f"LLM error details: {type(e).__name__}: {str(e)}")
             return None
     
     def _get_system_prompt(self) -> str:
-        """Get system prompt with safety constraints."""
-        return """You are a financial education assistant. Your role is to explain financial recommendations in clear, educational terms.
+        """Get system prompt with educational constraints."""
+        return """You are a financial education assistant. Your role is to explain financial concepts and portfolio data in clear, educational terms, like a finance professor explaining tools.
 
-CRITICAL SAFETY RULES:
+CRITICAL EDUCATIONAL RULES:
 1. NEVER change any numbers - use the exact numbers provided
-2. NEVER suggest new trades or investments
-3. NEVER override or question the advisor's decision
-4. ONLY explain what is already in the recommendation
-5. Use the exact percentages, amounts, and values provided
+2. NEVER use words like "buy", "sell", "invest", or "you should"
+3. NEVER rank, score, or recommend securities
+4. NEVER predict future performance
+5. ONLY explain concepts and existing data
+6. Use neutral, explanatory language only
+7. Explain what data means, not what actions to take
+8. Use the exact percentages, amounts, and values provided
 
 Your explanations should be:
-- Clear and educational
-- Helpful for understanding financial concepts
+- Clear and educational, like a finance professor
+- Neutral and explanatory, not advisory
+- Focused on explaining concepts and existing data
+- Helpful for understanding financial fundamentals
 - Respectful of the user's financial situation
-- Focused on explaining the existing recommendation, not creating new ones"""
+- Never tell users what to do, only explain what things mean"""
     
     def _build_safe_prompt(
         self,
@@ -149,34 +158,40 @@ Your explanations should be:
         """Build a safe prompt with all necessary information."""
         parts = []
         
-        parts.append("Explain this financial recommendation to the user in clear, educational terms.")
+        parts.append("Explain this portfolio proposal and decision in clear, educational terms. Act like a finance professor explaining concepts, not an advisor making recommendations.")
         parts.append("\n## Decision:")
         parts.append(f"Type: {decision_summary.get('decision_type', 'unknown')}")
         parts.append(f"Status: {decision_summary.get('status', 'unknown')}")
         
         if guardrail_info:
-            parts.append("\n## Guardrails:")
+            parts.append("\n## Safety Guardrails:")
             parts.append(f"Status: {guardrail_info.get('status', 'unknown')}")
             if guardrail_info.get('reasons'):
-                parts.append("Reasons:")
+                parts.append("Safety considerations:")
                 for reason in guardrail_info['reasons']:
                     parts.append(f"- {reason.get('message', reason.get('code', ''))}")
         
         if proposal_info:
-            parts.append("\n## Portfolio Proposal:")
+            parts.append("\n## Portfolio Allocation:")
             allocation = proposal_info.get('allocation', {})
             if allocation:
                 parts.append(f"Allocation: {allocation.get('stocks', 0)}% stocks, {allocation.get('bonds', 0)}% bonds, {allocation.get('cash', 0)}% cash")
             if proposal_info.get('trade_count'):
-                parts.append(f"Number of trades: {proposal_info['trade_count']}")
+                parts.append(f"Number of transactions: {proposal_info['trade_count']}")
             if proposal_info.get('risk_delta') is not None:
-                parts.append(f"Risk change: {proposal_info['risk_delta']}")
+                parts.append(f"Risk profile change: {proposal_info['risk_delta']}")
         
         parts.append("\n## Financial Context:")
-        parts.append(f"Emergency fund: {financial_state_summary.get('emergency_fund_months', 0)} months")
+        parts.append(f"Emergency fund coverage: {financial_state_summary.get('emergency_fund_months', 0)} months")
         parts.append(f"Net cashflow: ${financial_state_summary.get('net_cashflow', 0):,.0f}/month")
         
-        parts.append("\nRemember: Use the EXACT numbers provided. Do not suggest new trades or change any values.")
+        parts.append("\nRemember:")
+        parts.append("- Use the EXACT numbers provided")
+        parts.append("- Explain concepts and data, not what actions to take")
+        parts.append("- Use neutral, educational language")
+        parts.append("- Never use words like 'buy', 'sell', 'invest', or 'you should'")
+        parts.append("- Never rank, score, or recommend securities")
+        parts.append("- Never predict future performance")
         
         return "\n".join(parts)
     
@@ -243,34 +258,50 @@ Your explanations should be:
         # Require at least 50% of significant numbers to be present
         return found_count >= len(significant_numbers) * 0.5
     
-    def _contains_unsafe_content(self, text: str) -> bool:
+    def _contains_unsafe_content(self, text: str) -> Optional[str]:
         """
-        Check if text contains unsafe content (trade suggestions, decision overrides).
+        Check if text contains unsafe content (recommendations, predictions, advisory language).
         
-        Returns True if unsafe content detected.
+        Returns the pattern that matched if unsafe content detected, None otherwise.
         More precise patterns to avoid false positives.
         """
         text_lower = text.lower()
         
-        # More precise unsafe patterns (avoid false positives)
+        # Educational constraint patterns (avoid false positives)
+        # Patterns are ordered from most specific to least specific
         unsafe_patterns = [
-            r'suggest.*new.*trade',  # Must be "new trade"
-            r'recommend.*you.*buy',  # Must be "you buy"
-            r'recommend.*you.*sell',  # Must be "you sell"
-            r'you should.*invest.*in',  # Must be "invest in"
-            r'consider.*instead.*of',  # Must be "instead of"
-            r'override.*decision',  # Must be "override decision"
-            r'disagree.*with.*decision',  # Must be "disagree with decision"
-            r'change.*the.*allocation',  # Must be "the allocation"
-            r'modify.*this.*proposal',  # Must be "this proposal"
-            r'you.*should.*change',  # Direct instruction to change
-            r'i.*recommend.*different',  # Recommending something different
+            # Recommendation language
+            (r'\byou should\b.*(?:buy|sell|invest)', 'using "you should" with action words'),
+            (r'\byou should\b.*(?:stock|bond|asset|security)', 'using "you should" with securities'),
+            (r'recommend.*you.*(?:buy|sell|invest)', 'recommending specific actions'),
+            (r'suggest.*you.*(?:buy|sell|invest)', 'suggesting specific actions'),
+            (r'\byou should\b.*(?:purchase|acquire|divest)', 'using "you should" with purchase language'),
+            # Action words in advisory context
+            (r'\b(?:buy|sell|invest)\b.*(?:now|today|immediately|should)', 'using action words with urgency'),
+            (r'\b(?:buy|sell|invest)\b.*(?:recommend|suggest|advise)', 'using action words with recommendation language'),
+            # Ranking/scoring
+            (r'(?:rank|score|rate).*as.*(?:best|worst|top|bottom)', 'ranking or scoring securities'),
+            (r'(?:best|worst|top|bottom).*stock|security|investment', 'ranking securities'),
+            # Predictions
+            (r'(?:will|going to|likely to).*(?:increase|decrease|go up|go down|rise|fall)', 'predicting future performance'),
+            (r'(?:expected|forecast|predict).*(?:return|performance|price)', 'predicting returns or performance'),
+            (r'(?:guarantee|guaranteed).*(?:return|profit|gain)', 'guaranteeing returns'),
+            # Trade suggestions
+            (r'suggest.*new.*trade', 'suggesting new trades'),
+            (r'recommend.*different.*(?:allocation|portfolio|strategy)', 'recommending different strategies'),
+            (r'consider.*instead.*of.*this', 'suggesting alternatives to current proposal'),
+            # Decision overrides
+            (r'override.*decision', 'overriding decisions'),
+            (r'disagree.*with.*this.*decision', 'disagreeing with decisions'),
+            (r'change.*the.*allocation.*to', 'changing allocations'),
+            (r'modify.*this.*proposal.*to', 'modifying proposals'),
         ]
         
-        for pattern in unsafe_patterns:
+        for pattern, description in unsafe_patterns:
             if re.search(pattern, text_lower):
-                logger.warning(f"Unsafe content detected: {pattern}")
-                return True
+                match = re.search(pattern, text_lower)
+                matched_text = match.group(0) if match else "pattern matched"
+                return f"{description} (matched: '{matched_text[:50]}...')"
         
-        return False
+        return None
 
