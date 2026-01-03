@@ -69,6 +69,7 @@ class Settings(BaseSettings):
         env_file=str(env_file) if env_file.exists() else None,
         env_file_encoding="utf-8",
         case_sensitive=True,
+        extra="ignore",  # Ignore extra environment variables (e.g., SUPABASE_ANON_KEY, SUPABASE_JWT_SECRET)
     )
 
 

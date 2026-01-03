@@ -7,6 +7,18 @@ Rules of Engagement:
 - Guardrails must be deterministic code, not LLM decisions
 - All model outputs must be structured JSON (Pydantic models)
 - Agents coordinate between integrations, services, and repositories
+
+Guardrail Agent Responsibilities:
+- Evaluates user intent explicitly
+- Returns structured decisions: ALLOW, WARN_AND_EDUCATE, BLOCK
+- Blocks high-risk instructions
+- Provides educational alternatives (not recommendations)
+
+Hard Constraints:
+- MUST NOT recommend stocks, portfolios, or actions
+- MUST NOT explain market fundamentals in depth
+- MUST NOT provide financial advice
+- Acts as a compliance and safety filter, not a conversational assistant
 """
 
 from typing import Optional, List, Dict, Any
@@ -20,22 +32,39 @@ from app.agents.schemas import (
     UserIntent,
     UserIntentType,
     PortfolioProposal,
+    IntentDecision,
+    IntentDecisionType,
 )
 
 
 class GuardrailAgent:
     """
-    Guardrail agent for deterministic validation.
+    Guardrail agent for deterministic validation and intent evaluation.
     
-    This agent performs deterministic validation checks. It does NOT use
-    LLM to make decisions about numbers or trades. All validation logic
-    is deterministic code.
+    This agent acts as a compliance and safety filter that:
+    1. Evaluates user intent explicitly
+    2. Returns structured decisions: ALLOW, WARN_AND_EDUCATE, BLOCK
+    3. Blocks high-risk instructions
+    4. Provides educational alternatives (not recommendations)
     
-    Guardrail Rules:
+    This agent does NOT:
+    - Recommend stocks, portfolios, or actions
+    - Explain market fundamentals in depth
+    - Provide financial advice
+    - Act as a conversational assistant
+    
+    All validation logic is deterministic code. No LLM decisions about
+    numbers or trades are made here.
+    
+    Guardrail Rules (for validate method):
     - Negative cash flow => BLOCK for "invest now" intents
-    - Emergency fund months < 3 => WARN for risk increase, WARN/BLOCK for investing large amount
-    - High-interest debt APR >= 15% and balance > 0 => WARN for investing lump sum
-    - Goal timeframe < 12 months => WARN/BLOCK for equity-heavy recommendations
+    - Emergency fund months < 3 => WARN_AND_EDUCATE for risk increase (intent-related), WARN/BLOCK for investing large amount
+    - High-interest debt APR >= 15% and balance > 0 => WARN_AND_EDUCATE for investing lump sum (intent-related)
+    - Goal timeframe < 12 months => WARN/BLOCK for equity-heavy recommendations (proposal validation - uses WARN)
+    
+    Note:
+    - WARN_AND_EDUCATE: Used for user intent evaluation warnings (intent-related concerns)
+    - WARN: Reserved for proposal/output validation warnings (proposal-specific issues)
     """
     
     # Thresholds
@@ -45,9 +74,146 @@ class GuardrailAgent:
     LARGE_INVESTMENT_THRESHOLD = 10000.0  # $10k considered large
     EQUITY_HEAVY_THRESHOLD = 60.0  # >60% stocks considered equity-heavy
     
+    # High-risk patterns for intent evaluation
+    HIGH_RISK_PATTERNS = [
+        "invest all",
+        "all my money",
+        "everything i have",
+        "guaranteed returns",
+        "guaranteed profit",
+        "risk-free",
+        "what should i buy",
+        "what to buy right now",
+        "what stock should i",
+        "best stock to buy",
+        "sure thing",
+        "can't lose",
+    ]
+    
     def __init__(self):
         """Initialize the guardrail agent."""
         pass
+    
+    async def evaluate_intent(
+        self,
+        user_intent: UserIntent,
+        financial_state: Optional[FinancialState] = None
+    ) -> IntentDecision:
+        """
+        Evaluate user intent and return explicit structured decision.
+        
+        This method evaluates the user's intent for safety and compliance.
+        It checks for high-risk patterns and recommendation requests.
+        
+        Decision Logic:
+        - High-risk instructions (e.g., "invest all my money", "guaranteed returns")
+          -> BLOCK
+        - Requests for recommendations (GET_ADVICE intent or recommendation language)
+          -> WARN_AND_EDUCATE (by default)
+        - Safe, specific requests -> ALLOW
+        
+        Args:
+            user_intent: User's intent or request
+            financial_state: Optional financial state for context
+            
+        Returns:
+            IntentDecision with decision, reason, and safe_alternative
+            
+        Note:
+            This method does NOT recommend stocks, portfolios, or actions.
+            safe_alternative provides educational guidance only.
+        """
+        # Extract intent text from metadata if available
+        intent_text = user_intent.metadata.get("text", "").lower() if user_intent.metadata else ""
+        
+        # Check for high-risk patterns in intent
+        if self._contains_high_risk_pattern(intent_text, user_intent, financial_state):
+            return IntentDecision(
+                decision=IntentDecisionType.BLOCK,
+                reason="This request contains high-risk language that could lead to financial harm. We cannot proceed with requests that promise guaranteed returns or suggest investing all available funds.",
+                safe_alternative="Consider speaking with a licensed financial advisor about your goals and risk tolerance before making investment decisions."
+            )
+        
+        # Check for recommendation requests
+        if self._is_recommendation_request(user_intent, intent_text):
+            return IntentDecision(
+                decision=IntentDecisionType.WARN_AND_EDUCATE,
+                reason="This appears to be a request for investment recommendations. We provide educational information and portfolio analysis, but cannot provide specific investment advice.",
+                safe_alternative="You can review your portfolio allocation, understand your risk profile, and learn about diversification principles. For specific investment recommendations, consult a licensed financial advisor."
+            )
+        
+        # Default: ALLOW for specific, safe requests
+        return IntentDecision(
+            decision=IntentDecisionType.ALLOW,
+            reason="This request appears safe to proceed.",
+            safe_alternative=None
+        )
+    
+    def _contains_high_risk_pattern(
+        self,
+        intent_text: str,
+        user_intent: UserIntent,
+        financial_state: Optional[FinancialState] = None
+    ) -> bool:
+        """
+        Check if intent contains high-risk patterns.
+        
+        Args:
+            intent_text: Lowercase text from intent metadata
+            user_intent: User intent object
+            financial_state: Optional financial state for context
+            
+        Returns:
+            True if high-risk pattern detected
+        """
+        # Check text patterns
+        for pattern in self.HIGH_RISK_PATTERNS:
+            if pattern in intent_text:
+                return True
+        
+        # Check for "invest all" via amount comparison
+        if user_intent.type == UserIntentType.INVEST and user_intent.amount:
+            # If amount is very large relative to portfolio, could be "all money"
+            # This is a heuristic - actual check would need portfolio value
+            if financial_state and hasattr(financial_state, 'portfolio_summary'):
+                portfolio_value = financial_state.portfolio_summary.total_value
+                if portfolio_value > 0 and user_intent.amount >= portfolio_value * 0.95:
+                    return True
+        
+        return False
+    
+    def _is_recommendation_request(self, user_intent: UserIntent, intent_text: str) -> bool:
+        """
+        Check if intent is a request for recommendations.
+        
+        Args:
+            user_intent: User intent object
+            intent_text: Lowercase text from intent metadata
+            
+        Returns:
+            True if this is a recommendation request
+        """
+        # Check intent type
+        if user_intent.type == UserIntentType.GET_ADVICE:
+            return True
+        
+        # Check for recommendation language patterns
+        recommendation_patterns = [
+            "what should i",
+            "what do you recommend",
+            "what would you",
+            "recommend",
+            "suggest",
+            "advice",
+            "what to invest",
+            "should i buy",
+        ]
+        
+        for pattern in recommendation_patterns:
+            if pattern in intent_text:
+                return True
+        
+        return False
     
     async def validate(
         self,
@@ -57,6 +223,9 @@ class GuardrailAgent:
     ) -> GuardrailResult:
         """
         Perform deterministic guardrail validation.
+        
+        This method validates financial state and proposals against safety rules.
+        For intent evaluation, use evaluate_intent() instead.
         
         Args:
             financial_state: User's current financial state
@@ -69,6 +238,7 @@ class GuardrailAgent:
         Note:
             This method uses deterministic code only. No LLM decisions
             about numbers or trades are made here.
+            This method does NOT recommend stocks, portfolios, or actions.
         """
         reasons: List[GuardrailReason] = []
         computed_values: dict = {}
@@ -93,12 +263,12 @@ class GuardrailAgent:
                     ))
                     highest_severity = GuardrailStatus.BLOCK
         
-        # Rule 2: Emergency fund months < 3 => WARN for risk increase, WARN/BLOCK for investing large amount
+        # Rule 2: Emergency fund months < 3 => WARN_AND_EDUCATE for risk increase (intent-related), WARN/BLOCK for investing large amount
         emergency_months = financial_state.emergency_fund_months
         computed_values["emergency_fund_months"] = emergency_months
         
         if emergency_months < self.EMERGENCY_FUND_MIN_MONTHS:
-            # WARN for risk increase
+            # WARN_AND_EDUCATE for risk increase (intent-related warning)
             if user_intent.risk_change is not None and user_intent.risk_change > 0:
                 reasons.append(GuardrailReason(
                     code="LOW_EMERGENCY_FUND_RISK_INCREASE",
@@ -106,7 +276,7 @@ class GuardrailAgent:
                     severity="warning"
                 ))
                 if highest_severity == GuardrailStatus.ALLOW:
-                    highest_severity = GuardrailStatus.WARN
+                    highest_severity = GuardrailStatus.WARN_AND_EDUCATE
             
             # WARN/BLOCK for investing large amount
             if user_intent.type == UserIntentType.INVEST and user_intent.amount is not None:
@@ -126,7 +296,7 @@ class GuardrailAgent:
                     if highest_severity == GuardrailStatus.ALLOW:
                         highest_severity = GuardrailStatus.WARN
         
-        # Rule 3: High-interest debt APR >= 15% and balance > 0 => WARN for investing lump sum
+        # Rule 3: High-interest debt APR >= 15% and balance > 0 => WARN_AND_EDUCATE for investing lump sum (intent-related)
         # Assume credit card debt is high-interest (typically 15%+)
         credit_card_debt = financial_state.debt_summary.credit_card_debt
         computed_values["credit_card_debt"] = credit_card_debt
@@ -144,8 +314,9 @@ class GuardrailAgent:
                         message=f"High-interest debt (${credit_card_debt:,.0f} at {debt_apr:.1f}% APR) detected. Consider paying down debt before investing large amounts.",
                         severity="warning"
                     ))
+                    # WARN_AND_EDUCATE for intent-related warning (user wants to invest large amount)
                     if highest_severity == GuardrailStatus.ALLOW:
-                        highest_severity = GuardrailStatus.WARN
+                        highest_severity = GuardrailStatus.WARN_AND_EDUCATE
         
         # Rule 4: Goal timeframe < 12 months => WARN/BLOCK for equity-heavy recommendations
         if proposal is not None:
@@ -206,6 +377,7 @@ class GuardrailAgent:
                     ))
                     highest_severity = GuardrailStatus.BLOCK
                 else:
+                    # WARN for proposal validation (proposal-specific issue, not intent-related)
                     reasons.append(GuardrailReason(
                         code="SHORT_TERM_GOAL_EQUITY_HEAVY",
                         message=f"Short-term goals ({goal_names}) within 12 months. Consider reducing equity allocation ({equity_allocation:.1f}%) for short-term goals.",

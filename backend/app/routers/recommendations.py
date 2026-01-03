@@ -16,7 +16,7 @@ from app.auth import get_current_user
 from app.models.user import UserContext
 from app.models.common import RecommendationResponse, LatestRecommendationResponse, ApprovalResponse
 from app.models.errors import NotFoundError, ValidationError
-from app.services.recommendation_service import RecommendationService
+from app.services.chat_service import ChatService
 from app.services.approval_service import ApprovalService
 
 router = APIRouter(prefix="/recommendations", tags=["recommendations"])
@@ -38,22 +38,34 @@ async def generate_recommendation(
     intent_data: Optional[IntentDataRequest] = Body(default=None, embed=False)
 ):
     """
-    Generates one recommendation for the user.
+    Generates portfolio allocation example through orchestrator/chat flow.
     
-    Fetches profile, fetches latest positions, generates, and then stores in DB.
+    This endpoint routes through ChatService.handle_user_request() which:
+    1. Calls orchestrator (which calls guardrail agent FIRST)
+    2. Routes based on guardrail decision
+    3. Only generates recommendations if guardrail returns ALLOW
+    
+    Constraints:
+    - Routes through orchestrator/chat flow (cannot bypass)
+    - Guardrail agent is called FIRST by orchestrator
+    - Only generates if guardrail returns ALLOW
+    - Returns educational examples, not personalized financial advice
     
     Requires: Authorization: Bearer <token>
     
     Request Body (optional - can be empty {} or omitted):
     {
-      "type": "invest",  // "invest", "withdraw", "rebalance", "change_risk", etc.
+      "type": "invest",  // REQUIRED for recommendations: "invest" or "get_advice"
+                         // If omitted or "other", routes to educational mode
       "amount": 1000.0,  // Optional: dollar amount
       "risk_change": 0.1,  // Optional: risk change (-1.0 to 1.0)
       "target": "AAPL",  // Optional: target symbol or goal
       "timeframe": "immediate"  // Optional: timeframe string
     }
     
-    Note: You can send an empty object {} or omit the body entirely.
+    Note: Education precedes examples. If intent type is missing, ambiguous, or "other",
+    the system defaults to educational mode (tutor agent) and does NOT generate recommendations.
+    Only explicit "invest" or "get_advice" intents trigger recommendation flows.
     
     Response Contract:
     - recommendation_id: string (required) - Unique recommendation identifier
@@ -61,10 +73,18 @@ async def generate_recommendation(
     - status: string (required) - Recommendation status: "pending"
     - created_at: ISO datetime string (required) - When recommendation was created
     
-    Example Response:
+    Example Response (ALLOW):
     {
       "recommendation_id": "rec-123",
       "decision": "approve",
+      "status": "pending",
+      "created_at": "2024-01-15T10:30:00"
+    }
+    
+    Example Response (BLOCK - no recommendation generated):
+    {
+      "recommendation_id": "",
+      "decision": "reject",
       "status": "pending",
       "created_at": "2024-01-15T10:30:00"
     }
@@ -76,16 +96,56 @@ async def generate_recommendation(
         "message": "User profile not found",
         "details": null
       }
+    - 400 ExternalServiceError: Guardrail blocked request
+      {
+        "code": "GUARDRAIL_NOT_ALLOW",
+        "message": "Cannot generate portfolio allocation example. Guardrail status: BLOCK",
+        "details": null
+      }
     """
-    service = RecommendationService()
+    from app.services.chat_service import ChatService
+    from datetime import datetime, timezone
     
-    # Convert Pydantic model to dict, or None if not provided
-    user_intent_data = intent_data.model_dump(exclude_none=True) if intent_data else None
+    # Convert Pydantic model to dict
+    # Education precedes examples: do NOT default to recommendation intent
+    user_intent_data = intent_data.model_dump(exclude_none=True) if intent_data else {}
     
-    recommendation = await service.generate_recommendation(
+    # Only trigger recommendation flows with explicit intent
+    # Missing or ambiguous intent defaults to educational mode (handled by ChatService)
+    # ChatService._build_user_intent() defaults to UserIntentType.OTHER if type is missing/invalid
+    # Recommendation service only executes for GET_ADVICE or INVEST intents
+    
+    # Route through ChatService (which calls orchestrator, which calls guardrail FIRST)
+    chat_service = ChatService()
+    response = await chat_service.handle_user_request(
         user_id=user.user_id,
         user_intent_data=user_intent_data
     )
+    
+    # Extract recommendation_id if one was generated
+    recommendation_id = response.get("recommendation_id", "")
+    
+    # If no recommendation was generated (e.g., BLOCK or WARN), return decision info
+    if not recommendation_id:
+        return RecommendationResponse(
+            recommendation_id="",
+            decision=response.get("decision", "reject"),
+            status="pending",
+            created_at=datetime.now(timezone.utc).isoformat()
+        )
+    
+    # Load the recommendation to get full details
+    from app.repositories import recommendations_repo
+    recommendation = recommendations_repo.get_recommendation(recommendation_id)
+    
+    if not recommendation:
+        # Recommendation was created but not found (shouldn't happen)
+        return RecommendationResponse(
+            recommendation_id=recommendation_id,
+            decision=response.get("decision", "approve"),
+            status="pending",
+            created_at=datetime.now(timezone.utc).isoformat()
+        )
     
     return RecommendationResponse(
         recommendation_id=str(recommendation.get("id", "")),
@@ -100,7 +160,15 @@ async def get_latest_recommendation(
     user: UserContext = Depends(get_current_user)
 ):
     """
-    Fetches most recent recommendation for the user.
+    Fetches most recent recommendation for the user (read-only).
+    
+    Constraints:
+    - Read-only endpoint (does not generate new recommendations)
+    - Does not return financial advice (returns stored decision data only)
+    - Does not bypass orchestrator (no generation happens here)
+    
+    This endpoint only retrieves existing stored recommendations.
+    To generate new recommendations, use POST /recommendations/generate.
     
     Requires: Authorization: Bearer <token>
     
@@ -131,6 +199,14 @@ async def get_latest_recommendation(
       "guardrail_status": "BLOCK",
       "has_proposal": false
     }
+    
+    Error Responses:
+    - 404 NotFoundError: No recommendations found
+      {
+        "code": "NO_RECOMMENDATIONS_FOUND",
+        "message": "No recommendations found",
+        "details": null
+      }
     """
     from app.repositories import recommendations_repo
     from app.models.errors import NotFoundError
@@ -166,7 +242,13 @@ async def approve_recommendation(
     request: ApprovalRequest = Body(...)
 ):
     """
-    User approves recommendation, backend places trade w/ Alpaca.
+    User approves existing recommendation (does not generate new recommendations).
+    
+    Constraints:
+    - Only approves existing stored recommendations
+    - Does not generate new recommendations or financial advice
+    - Does not bypass orchestrator (no generation happens here)
+    - Validates required confirmations before approval
     
     Requires all confirmations if the recommendation has warnings or blocks.
     - WARN: Requires checkbox confirmations (confirmation_text must match exactly)
@@ -228,11 +310,26 @@ async def approve_recommendation(
 
 
 @router.post("/{recommendation_id}/reject")
-async def reject_recommendation(recommendation_id: str):
+async def reject_recommendation(
+    recommendation_id: str,
+    user: UserContext = Depends(get_current_user)
+):
     """
-    User rejects the recommendation, no trade executed.
+    User rejects existing recommendation (removed for MVP).
     
-    TODO: Implement rejection logic.
+    This endpoint is removed for MVP as it does not generate recommendations
+    and is not critical for the core flow.
+    
+    Constraints:
+    - Removed for MVP (not critical functionality)
+    - Does not generate recommendations or financial advice
+    - Can be re-implemented later if needed
+    
+    For MVP, users can simply not approve recommendations they don't want.
     """
-    return {"message": "Not implemented yet", "recommendation_id": recommendation_id}
+    from app.models.errors import NotFoundError
+    raise NotFoundError(
+        "Rejection endpoint removed for MVP. Recommendations can be ignored if not approved.",
+        "ENDPOINT_REMOVED_MVP"
+    )
 

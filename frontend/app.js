@@ -1,5 +1,6 @@
 // API Configuration
-const API_BASE_URL = 'http://localhost:8000';
+// Load from config.js if available, otherwise use default
+const API_BASE_URL = window.API_BASE_URL || 'http://localhost:8000';
 
 // Token management
 let authToken = localStorage.getItem('authToken') || '';

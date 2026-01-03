@@ -195,11 +195,44 @@ class UserIntent(BaseModel):
 
 
 class GuardrailStatus(str, Enum):
-    """Guardrail validation status."""
+    """Guardrail validation status.
+    
+    Status Types:
+    - ALLOW: Request passes all validations, safe to proceed
+    - WARN: Proposal or output validation has warnings (e.g., equity-heavy allocation for short-term goals)
+    - WARN_AND_EDUCATE: User intent evaluation requires education (e.g., recommendation requests, intent-related warnings)
+    - BLOCK: Request is blocked due to safety/compliance concerns
+    """
     
     ALLOW = "ALLOW"
-    WARN = "WARN"
+    WARN = "WARN"  # Reserved for proposal/output validation warnings
+    WARN_AND_EDUCATE = "WARN_AND_EDUCATE"  # Used for user intent evaluation warnings
     BLOCK = "BLOCK"
+
+
+class IntentDecisionType(str, Enum):
+    """Explicit decision types for user intent evaluation."""
+    
+    ALLOW = "ALLOW"
+    WARN_AND_EDUCATE = "WARN_AND_EDUCATE"
+    BLOCK = "BLOCK"
+
+
+class IntentDecision(BaseModel):
+    """Structured decision from guardrail agent intent evaluation."""
+    
+    decision: IntentDecisionType = Field(..., description="Decision: ALLOW, WARN_AND_EDUCATE, or BLOCK")
+    reason: str = Field(..., description="Plain English explanation of the decision")
+    safe_alternative: Optional[str] = Field(None, description="Educational suggestion only (not a recommendation)")
+    
+    @classmethod
+    def default_allow(cls) -> "IntentDecision":
+        """Unit-testable default - ALLOW decision."""
+        return cls(
+            decision=IntentDecisionType.ALLOW,
+            reason="Request is safe to proceed.",
+            safe_alternative=None
+        )
 
 
 class GuardrailReason(BaseModel):
@@ -222,7 +255,7 @@ class GuardrailReason(BaseModel):
 class GuardrailResult(BaseModel):
     """Result from guardrail validation with status, reasons, and computed values."""
     
-    status: GuardrailStatus = Field(..., description="Validation status: ALLOW, WARN, or BLOCK")
+    status: GuardrailStatus = Field(..., description="Validation status: ALLOW, WARN, WARN_AND_EDUCATE, or BLOCK")
     reasons: List[GuardrailReason] = Field(default_factory=list, description="List of reason codes and messages")
     computed_values: Dict[str, Any] = Field(default_factory=dict, description="Computed values used in validation")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional validation metadata")

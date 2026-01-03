@@ -5,7 +5,8 @@
     'use strict';
 
     // API Configuration
-    const API_BASE_URL = 'http://localhost:8000';
+    // Load from config.js if available, otherwise use default
+    const API_BASE_URL = window.API_BASE_URL || 'http://localhost:8000';
 
     // Supabase Configuration - will be read when DOM is ready
     let SUPABASE_CONFIG = null;
@@ -178,7 +179,68 @@ async function sendMessage() {
     showLoading();
 
     try {
-        // Call chat endpoint
+        // Check if user wants to generate a recommendation
+        const messageLower = message.toLowerCase();
+        const wantsRecommendation = messageLower.includes('generate') || 
+                                   messageLower.includes('recommendation') ||
+                                   messageLower.includes('invest') ||
+                                   messageLower.includes('i want to invest') ||
+                                   messageLower.includes('create') ||
+                                   messageLower.includes('new recommendation');
+        
+        let recommendationId = null;
+        
+        // If user wants a recommendation, generate one first
+        if (wantsRecommendation) {
+            try {
+                // Extract amount if mentioned (e.g., "invest $5000" or "invest 5000")
+                const amountMatch = message.match(/\$?([\d,]+(?:\.\d{2})?)/);
+                const amount = amountMatch ? parseFloat(amountMatch[1].replace(/,/g, '')) : null;
+                
+                const generateResponse = await fetch(`${API_BASE_URL}/recommendations/generate`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${currentSession.access_token}`
+                    },
+                    body: JSON.stringify({
+                        type: 'invest',
+                        amount: amount,
+                        timeframe: 'immediate'
+                    })
+                });
+                
+                if (generateResponse.ok) {
+                    const generateData = await generateResponse.json();
+                    recommendationId = generateData.recommendation_id;
+                    console.log('Generated recommendation:', recommendationId);
+                } else {
+                    const errorData = await generateResponse.json();
+                    // Better error message extraction
+                    let errorMessage = 'Failed to generate recommendation';
+                    if (errorData.message) {
+                        errorMessage = errorData.message;
+                    } else if (errorData.code) {
+                        errorMessage = `${errorData.code}: ${errorData.message || 'Unknown error'}`;
+                    } else if (errorData.detail) {
+                        errorMessage = errorData.detail;
+                    }
+                    throw new Error(errorMessage);
+                }
+            } catch (error) {
+                console.error('Error generating recommendation:', error);
+                removeTypingIndicator(typingId);
+                hideLoading();
+                sendButton.disabled = false;
+                addMessage('advisor', `I encountered an error generating a recommendation: ${error.message}. Please try again or check if you have a profile set up.`, {
+                    type: 'error'
+                });
+                return;
+            }
+        }
+        
+        // Call chat endpoint to get explanation
+        // Use the newly generated recommendation ID, or get latest if none
         const response = await fetch(`${API_BASE_URL}/chat`, {
             method: 'POST',
             headers: {
@@ -186,7 +248,7 @@ async function sendMessage() {
                 'Authorization': `Bearer ${currentSession.access_token}`
             },
             body: JSON.stringify({
-                message: message
+                recommendation_id: recommendationId || null
             })
         });
 
@@ -199,7 +261,16 @@ async function sendMessage() {
                 throw new Error('Authentication required');
             }
             const errorData = await response.json();
-            throw new Error(errorData.detail?.message || 'Failed to get response');
+            // Better error message extraction
+            let errorMessage = 'Failed to get response';
+            if (errorData.message) {
+                errorMessage = errorData.message;
+            } else if (errorData.code) {
+                errorMessage = `${errorData.code}: ${errorData.message || 'Unknown error'}`;
+            } else if (errorData.detail) {
+                errorMessage = typeof errorData.detail === 'string' ? errorData.detail : JSON.stringify(errorData.detail);
+            }
+            throw new Error(errorMessage);
         }
 
         const data = await response.json();
@@ -207,9 +278,10 @@ async function sendMessage() {
         // Remove typing indicator
         removeTypingIndicator(typingId);
 
-        // Add advisor response
+        // Backend returns { explanation: "..." } format
+        // Check if it's the new format (explanation) or old format (message)
+        const advisorMessage = data.explanation || data.message || 'I received your message.';
         const responseType = data.type || 'conversation';
-        const advisorMessage = data.message || 'I received your message.';
         const isBlocked = data.data?.blocked || false;
 
         addMessage('advisor', advisorMessage, {
@@ -233,6 +305,7 @@ async function sendMessage() {
         showToast('Error: ' + error.message, 'error');
     } finally {
         hideLoading();
+        sendButton.disabled = false;
     }
 }
 
