@@ -1,51 +1,24 @@
 myStockDNA – Darwin Portfolio Optimizer
 
-myStockDNA is an investment analysis and portfolio optimization platform powered by Darwin, a machine-learning–driven engine that helps users build and optimize portfolios based on goals, financial data, and risk tolerance.
+myStockDNA is an investment analysis and portfolio optimization platform built around Darwin, a machine-learning–driven engine that helps users construct and optimize portfolios based on goals, financial data, and risk tolerance.
 
-Features
+What it does
+Darwin takes a set of stocks or ETFs and produces optimized portfolio allocations. It evaluates fundamentals, risk, and correlations, then recommends percentage weights aligned to a selected risk profile.
 
-Portfolio optimization with percentage allocations
+Risk profiles
+The platform supports three investment risk profiles: Conservative, Moderate, and Aggressive. Based on connected financial data and user inputs, Darwin can also recommend adjusting the selected risk profile.
 
-Three risk profiles: Conservative, Moderate, Aggressive
+User inputs
+Users can select assets from preset universes or choose their own. The platform provides fundamental and technical data to support asset selection. Users can also describe goals in plain language and upload investment-related documents for review.
 
-Risk profile recommendations based on user financials
+Financial data
+Users may connect accounts via Plaid to provide asset and balance information. This data is used to ground portfolio recommendations in real financial context.
 
-Support for preset asset universes or user-selected stocks/ETFs
-
-Fundamental and technical analysis to guide asset selection
-
-Secure financial data integration (Plaid – assets & balances)
-
-Conversational planning with goal and constraint inputs
-
-PDF and document review for investment context
-
-How It Works
-
-User connects financial accounts and defines goals
-
-User selects assets or uses a preset universe
-
-Darwin analyzes risk, correlations, and fundamentals
-
-Optimized portfolio allocations are generated
-
-Clear explanations and recommendations are returned
-
-Tech Stack (High Level)
-
-Machine learning–based optimization engine
-
-Real-time market and fundamentals data via APIs
-
-Secure financial data aggregation (Plaid)
-
-Modular, API-driven backend architecture
+Architecture
+The system uses a modular, API-driven backend with real-time market data, a financial knowledge base, and a portfolio optimization engine.
 
 Status
-
-Active development. APIs and optimization logic are currently being integrated.
+This project is under active development. Core APIs and optimization logic are currently being integrated.
 
 Disclaimer
-
-For informational and educational purposes only. Not financial advice.
+This software is for educational and informational purposes only and does not constitute financial advice.
